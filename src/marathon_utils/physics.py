@@ -357,6 +357,268 @@ def decode_embedded_physics(chunks: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Marathon 1 record decoders
+#
+# M1 physics files use a different flat-chunk container (12 B per-chunk
+# header: uint32 tag + 4 unused + uint16 count + uint16 size) and smaller
+# record layouts. Many M2 fields aren't stored in the M1 format and the C++
+# code synthesizes default values (FIXED_ONE pitch, NONE for missing sounds,
+# etc.); we surface only what's actually in the bytes.
+# ---------------------------------------------------------------------------
+
+M1_MONS_RECORD = 138
+M1_EFFE_RECORD = 6
+M1_PROJ_RECORD = 36
+M1_PHYS_RECORD = 100
+M1_WEAP_RECORD = 120
+
+
+def _parse_m1_damage(d: bytes, off: int) -> dict:
+    """12-byte damage_definition shared by M1 monster and projectile records."""
+    return {
+        "type": _s16(d, off + 0),
+        "flags": _u16(d, off + 2),
+        "base": _s16(d, off + 4),
+        "random": _s16(d, off + 6),
+        "scale": _fixed(d, off + 8),
+    }
+
+
+def _parse_m1_attack(d: bytes, off: int) -> dict:
+    """16-byte attack_definition used by M1 monsters."""
+    return {
+        "type": _s16(d, off + 0),
+        "repetitions": _s16(d, off + 2),
+        "error": _s16(d, off + 4),
+        "range": _wd(d, off + 6),
+        "shape": _shape_desc(_u16(d, off + 8)),
+        "dx": _wd(d, off + 10),
+        "dy": _wd(d, off + 12),
+        "dz": _wd(d, off + 14),
+    }
+
+
+def parse_m1_mons_record(d: bytes, off: int) -> dict:
+    return {
+        "collection": _s16(d, off + 0),
+        "vitality": _s16(d, off + 2),
+        "immunities": _u32(d, off + 4),
+        "weaknesses": _u32(d, off + 8),
+        "flags": _u32(d, off + 12),
+        "class": _u32(d, off + 16),
+        "friends": _u32(d, off + 20),
+        "enemies": _u32(d, off + 24),
+        "activation_sound": _s16(d, off + 28),
+        # bytes 30-31: conversation sound, ignored by Aleph One
+        "flaming_sound": _s16(d, off + 32),
+        "random_sound": _s16(d, off + 34),
+        "random_sound_mask": _u16(d, off + 36),
+        "carrying_item_type": _s16(d, off + 38),
+        "radius": _wd(d, off + 40),
+        "height": _wd(d, off + 42),
+        "preferred_hover_height": _wd(d, off + 44),
+        "minimum_ledge_delta": _wd(d, off + 46),
+        "maximum_ledge_delta": _wd(d, off + 48),
+        "external_velocity_scale": _fixed(d, off + 50),
+        "impact_effect": _s16(d, off + 54),
+        "melee_impact_effect": _s16(d, off + 56),
+        "half_visual_arc": _s16(d, off + 58),
+        "half_vertical_visual_arc": _s16(d, off + 60),
+        "visual_range": _wd(d, off + 62),
+        "dark_visual_range": _wd(d, off + 64),
+        "intelligence": _s16(d, off + 66),
+        "speed": _s16(d, off + 68),
+        "gravity": _s16(d, off + 70),
+        "terminal_velocity": _s16(d, off + 72),
+        "door_retry_mask": _u16(d, off + 74),
+        "shrapnel_radius": _s16(d, off + 76),
+        "shrapnel_damage": _parse_m1_damage(d, off + 78),
+        "hit_shape": _shape_desc(_u16(d, off + 90)),
+        "hard_dying_shape": _shape_desc(_u16(d, off + 92)),
+        "soft_dying_shape": _shape_desc(_u16(d, off + 94)),
+        "hard_dead_shape": _shape_desc(_u16(d, off + 96)),
+        "soft_dead_shape": _shape_desc(_u16(d, off + 98)),
+        "stationary_shape": _shape_desc(_u16(d, off + 100)),
+        "moving_shape": _shape_desc(_u16(d, off + 102)),
+        "attack_frequency": _s16(d, off + 104),
+        "melee_attack": _parse_m1_attack(d, off + 106),
+        "ranged_attack": _parse_m1_attack(d, off + 122),
+    }
+
+
+def parse_m1_effe_record(d: bytes, off: int) -> dict:
+    return {
+        "collection": _s16(d, off + 0),
+        "shape": _s16(d, off + 2),
+        "flags": _u16(d, off + 4),
+    }
+
+
+def parse_m1_proj_record(d: bytes, off: int) -> dict:
+    return {
+        "collection": _s16(d, off + 0),
+        "shape": _s16(d, off + 2),
+        "detonation_effect": _s16(d, off + 4),
+        "contrail_effect": _s16(d, off + 6),
+        "ticks_between_contrails": _s16(d, off + 8),
+        "maximum_contrails": _s16(d, off + 10),
+        "radius": _wd(d, off + 12),
+        "area_of_effect": _wd(d, off + 14),
+        "damage": _parse_m1_damage(d, off + 16),
+        "flags": _u16(d, off + 28),
+        "speed": _wd(d, off + 30),
+        "maximum_range": _wd(d, off + 32),
+        "flyby_sound": _s16(d, off + 34),
+    }
+
+
+def parse_m1_phys_record(d: bytes, off: int) -> dict:
+    """M1 player physics — same as M2 PXpx but lacks splash_height."""
+    return {
+        "max_forward_velocity": _fixed(d, off + 0),
+        "max_backward_velocity": _fixed(d, off + 4),
+        "max_perpendicular_velocity": _fixed(d, off + 8),
+        "acceleration": _fixed(d, off + 12),
+        "deceleration": _fixed(d, off + 16),
+        "airborne_deceleration": _fixed(d, off + 20),
+        "gravitational_acceleration": _fixed(d, off + 24),
+        "climbing_acceleration": _fixed(d, off + 28),
+        "terminal_velocity": _fixed(d, off + 32),
+        "external_deceleration": _fixed(d, off + 36),
+        "angular_acceleration": _fixed(d, off + 40),
+        "angular_deceleration": _fixed(d, off + 44),
+        "max_angular_velocity": _fixed(d, off + 48),
+        "angular_recentering_velocity": _fixed(d, off + 52),
+        "fast_angular_velocity": _fixed(d, off + 56),
+        "fast_angular_maximum": _fixed(d, off + 60),
+        "maximum_elevation": _fixed(d, off + 64),
+        "external_angular_deceleration": _fixed(d, off + 68),
+        "step_delta": _fixed(d, off + 72),
+        "step_amplitude": _fixed(d, off + 76),
+        "radius": _fixed(d, off + 80),
+        "height": _fixed(d, off + 84),
+        "dead_height": _fixed(d, off + 88),
+        "camera_height": _fixed(d, off + 92),
+        "half_camera_separation": _fixed(d, off + 96),
+    }
+
+
+def parse_m1_weap_record(d: bytes, off: int) -> dict:
+    """M1 weapon definition — trigger fields are interleaved (T0/T1 pairs)
+    rather than packed in separate sub-records like M2."""
+    return {
+        "item_type": _s16(d, off + 0),
+        "weapon_class": _s16(d, off + 2),
+        "flags": _u16(d, off + 4),
+        "triggers": [
+            {
+                "ammunition_type": _s16(d, off + 6),
+                "rounds_per_magazine": _s16(d, off + 8),
+                "ticks_per_round": _s16(d, off + 58),
+                "recovery_ticks": _s16(d, off + 66),
+                "charging_ticks": _s16(d, off + 70),
+                "recoil_magnitude": _wd(d, off + 74),
+                "firing_sound": _s16(d, off + 78),
+                "click_sound": _s16(d, off + 82),
+                "reloading_sound": _s16(d, off + 86),
+                "charging_sound": _s16(d, off + 88),
+                "shell_casing_sound": _s16(d, off + 90),
+                "sound_activation_range": _s16(d, off + 94),
+                "projectile_type": _s16(d, off + 98),
+                "theta_error": _s16(d, off + 102),
+                "dx": _s16(d, off + 106),
+                "dz": _s16(d, off + 108),
+                "burst_count": _s16(d, off + 114),
+            },
+            {
+                "ammunition_type": _s16(d, off + 10),
+                "rounds_per_magazine": _s16(d, off + 12),
+                "ticks_per_round": _s16(d, off + 60),
+                "recovery_ticks": _s16(d, off + 68),
+                "charging_ticks": _s16(d, off + 72),
+                "recoil_magnitude": _wd(d, off + 76),
+                "firing_sound": _s16(d, off + 80),
+                "click_sound": _s16(d, off + 84),
+                "shell_casing_sound": _s16(d, off + 92),
+                "sound_activation_range": _s16(d, off + 96),
+                "projectile_type": _s16(d, off + 100),
+                "theta_error": _s16(d, off + 104),
+                "dx": _s16(d, off + 110),
+                "dz": _s16(d, off + 112),
+                "burst_count": _s16(d, off + 116),
+            },
+        ],
+        "firing_light_intensity": _fixed(d, off + 14),
+        "firing_intensity_decay_ticks": _s16(d, off + 18),
+        "idle_height": _fixed(d, off + 20),
+        "bob_amplitude": _fixed(d, off + 24),
+        "kick_height": _fixed(d, off + 28),
+        "reload_height": _fixed(d, off + 32),
+        "idle_width": _fixed(d, off + 36),
+        "horizontal_amplitude": _fixed(d, off + 40),
+        "collection": _s16(d, off + 44),
+        "idle_shape": _s16(d, off + 46),
+        "firing_shape": _s16(d, off + 48),
+        "reloading_shape": _s16(d, off + 50),
+        # bytes 52-53: unused
+        "charging_shape": _s16(d, off + 54),
+        "charged_shape": _s16(d, off + 56),
+        "await_reload_ticks": _s16(d, off + 62),
+        "ready_ticks": _s16(d, off + 64),
+    }
+
+
+_M1_CHUNK_DECODERS = {
+    "mons": (parse_m1_mons_record, M1_MONS_RECORD, "monsters"),
+    "effe": (parse_m1_effe_record, M1_EFFE_RECORD, "effects"),
+    "proj": (parse_m1_proj_record, M1_PROJ_RECORD, "projectiles"),
+    "phys": (parse_m1_phys_record, M1_PHYS_RECORD, "physics_constants"),
+    "weap": (parse_m1_weap_record, M1_WEAP_RECORD, "weapons"),
+}
+
+
+def _looks_like_m1_physics(blob: bytes) -> bool:
+    """Heuristic: M1 Physics.phys starts with one of the known 4-char chunk tags."""
+    return len(blob) >= 12 and blob[:4].decode("mac-roman", errors="replace") in _M1_CHUNK_DECODERS
+
+
+def _extract_m1_physics(blob: bytes) -> dict:
+    """Walk an M1 Physics.phys file. Each chunk has a 12-byte header
+    (uint32 tag + 4 padding + uint16 count + uint16 size) followed by
+    count*size record bytes."""
+    decoded: dict = {}
+    pos = 0
+    while pos + 12 <= len(blob):
+        tag = blob[pos:pos + 4].decode("mac-roman", errors="replace")
+        # bytes 4-7 unused
+        count = _u16(blob, pos + 8)
+        size = _u16(blob, pos + 10)
+        payload = blob[pos + 12: pos + 12 + count * size]
+        pos += 12 + count * size
+
+        entry = _M1_CHUNK_DECODERS.get(tag)
+        if entry is None:
+            decoded[tag] = {"_raw_bytes": len(payload), "count": count, "size": size}
+            continue
+        parser, expected_size, label = entry
+        if size != expected_size:
+            # File's per-record size doesn't match what Aleph One expects.
+            decoded[label] = {
+                "_error": f"record size mismatch: file={size} expected={expected_size}",
+                "count": count,
+            }
+            continue
+        records = []
+        for i in range(count):
+            try:
+                records.append(parser(payload, i * size))
+            except Exception as e:
+                records.append({"_error": str(e), "_offset": i * size})
+        decoded[label] = records
+    return decoded
+
+
+# ---------------------------------------------------------------------------
 # Top-level extractor
 # ---------------------------------------------------------------------------
 
@@ -403,11 +665,13 @@ def extract(source_path: Path | str, dest_dir: Path | str) -> dict:
             "version": hdr["version"], "name": hdr["name"],
             "wad_count": hdr["wad_count"],
         }
+    elif _looks_like_m1_physics(payload):
+        decoded = _extract_m1_physics(payload)
+        wad_info = {"format": "m1-physics"}
     else:
         (dest_dir / "Physics.raw").write_bytes(blob)
         decoded["_note"] = (
-            "M1 Physics.phys uses an older layout that doesn't match the M2 WAD-wrapped "
-            "MNpx/FXpx/PRpx/PXpx/WPpx records. Raw bytes preserved; per-record decoding TODO."
+            "Unrecognized physics file layout. Raw bytes preserved."
         )
 
     (dest_dir / "physics.json").write_text(

@@ -30,6 +30,6 @@ CLI::
 
 __version__ = "0.1.0"
 
-from . import macbinary, macrsrc, maps, physics, sounds, strings, wad
+from . import macbinary, macrsrc, maps, patches, physics, sounds, strings, wad
 
-__all__ = ["__version__", "macbinary", "macrsrc", "maps", "physics", "sounds", "strings", "wad"]
+__all__ = ["__version__", "macbinary", "macrsrc", "maps", "patches", "physics", "sounds", "strings", "wad"]

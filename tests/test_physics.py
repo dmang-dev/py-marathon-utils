@@ -116,11 +116,22 @@ def test_mi_level_embedded_physics_decoded(mi_map: Path, tmp_path: Path):
 
 
 @pytest.mark.needs_sample_data
-def test_m1_physics_phys_falls_back_gracefully(sample_dir: Path, tmp_path: Path):
-    """M1 Physics.phys uses an older layout — extractor should preserve raw bytes."""
+def test_m1_physics_phys_decodes_all_chunks(sample_dir: Path, tmp_path: Path):
+    """M1 Physics.phys uses an older flat-chunk container with smaller record
+    layouts than M2. All five chunks (mons/effe/proj/phys/weap) should decode."""
     src = sample_dir / "Physics.phys"
     if not src.is_file():
         pytest.skip("Physics.phys not found")
     result = physics.extract(src, tmp_path / "Physics")
-    assert result["wad_header"] is None
-    assert (tmp_path / "Physics" / "Physics.raw").is_file()
+    assert result["wad_header"] == {"format": "m1-physics"}
+    assert result["chunks"] == {
+        "monsters": 40, "effects": 38, "projectiles": 25,
+        "physics_constants": 3, "weapons": 7,
+    }
+    # Spot-check first monster looks sane
+    import json
+    ph = json.loads((tmp_path / "Physics" / "physics.json").read_text())
+    m0 = ph["monsters"][0]
+    assert m0["vitality"] > 0
+    assert 0 < m0["radius"] < 10  # WU range
+    assert 0 < m0["speed"] < 100  # ticks/cell-ish

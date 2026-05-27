@@ -6,6 +6,22 @@ All notable changes to py-marathon-utils. Format follows
 
 ## [Unreleased]
 
+### Added — M1 physics + Anvil patches
+
+- `physics`: M1 `Physics.phys` now fully decoded. M1 uses an older flat-chunk
+  container (12 B per-chunk header: `uint32 tag + 4 padding + uint16 count
+  + uint16 size`) with five smaller records: `mons` (138 B), `effe` (6 B),
+  `proj` (36 B), `phys` (100 B), `weap` (120 B). Layout extracted from
+  Aleph One's `unpack_m1_*_definition` functions. Field names are aligned
+  to the M2 equivalents where they match.
+- `patches`: new module reads Anvil-format shape patches (community texture/
+  sprite override packs distributed via Simplici7y et al.). Port of
+  `patch2xml.pl`. Includes a working `apply()` that overlays a patch onto a
+  parsed shapes result — the upstream `applypatch.pl` only stubbed this with
+  a `# tbd` comment, so this is functionality beyond the Perl reference.
+- CLI: new `marathon-utils extract patches <patch-file> <out>` subcommand.
+- 8 more tests (4 patches + updated M1 physics).
+
 ### Added — Strings and full physics decoding
 
 - `strings`: new module ports `strings2xml.pl`. Reads `STR `, `STR#`, `TEXT`,
