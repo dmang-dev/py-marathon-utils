@@ -6,6 +6,28 @@ All notable changes to py-marathon-utils. Format follows
 
 ## [Unreleased]
 
+### Added — Marathon 2 / Infinity support
+
+- `maps`: version-aware chunk parsing. M2/Infinity LITE records (100 B, six
+  function blocks) and the `medi`/`ambi`/`bonk` chunks now decode correctly.
+  Added an M2-format `PLAT` parser alongside the M1 `plat` parser. M1
+  behavior is unchanged — original Perl-parity tests still pass.
+- `shapes`: auto-detects M1 (Mac resource fork, row/column int16-opcode RLE)
+  vs M2/Infinity (flat collection-info table, column-major sparse bitmaps).
+  Both render to per-collection PNG.
+- `sounds`: added M2/Infinity `snd2` container support with the corrected
+  per-record layout (group_offset is absolute, perm_count is at byte 12 not
+  16 — the upstream Common Lisp reference had this wrong for current files).
+  Vectorized 8-bit-to-16-bit WAV conversion using `bytes.translate` (300×
+  faster on M2/Infinity sample volumes).
+- `visualize`: works on M1/M2/Infinity maps with no API changes (consumes
+  parsed levels directly).
+- WAD parser correctly handles M1 v0, M2 v2, and Infinity v4 headers.
+- 11 new integration tests covering all three Marathon versions
+  (`tests/test_m2_mi.py`).
+
+
+
 ## [0.1.0] — 2026-05-27
 
 Initial release. Clean-room Python port of the relevant subset of

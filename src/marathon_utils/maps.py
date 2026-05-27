@@ -131,8 +131,8 @@ def parse_poly(data: bytes) -> List[dict]:
     return out
 
 
-def parse_lite(data: bytes) -> List[dict]:
-    """Lights — M1 32 B records (very different from M2's 80+ B record!)."""
+def parse_lite_m1(data: bytes) -> List[dict]:
+    """M1 lights — 32 B records."""
     out = []
     rec_size = 32
     for off in range(0, len(data) - (rec_size - 1), rec_size):
@@ -146,6 +146,151 @@ def parse_lite(data: bytes) -> List[dict]:
             "period": _s16(data, off + 16),
             "intensity": _s32(data, off + 18) / 65536.0,
         })
+    return out
+
+
+_LITE_FUNC_STATES = ("primary_active", "secondary_active", "becoming_active",
+                     "primary_inactive", "secondary_inactive", "becoming_inactive")
+
+
+def parse_lite_m2(data: bytes) -> List[dict]:
+    """M2/Infinity lights — 100 B records.
+
+    Each light defines six functions (one per state in `_LITE_FUNC_STATES`).
+    Each function block is 14 B: function, period, delta_period, intensity (Fixed),
+    delta_intensity (Fixed).
+    """
+    out = []
+    rec_size = 100
+    for off in range(0, len(data) - (rec_size - 1), rec_size):
+        functions = {}
+        for i, state in enumerate(_LITE_FUNC_STATES):
+            fo = off + 6 + i * 14
+            functions[state] = {
+                "function": _s16(data, fo + 0),
+                "period": _s16(data, fo + 2),
+                "delta_period": _s16(data, fo + 4),
+                "intensity": _s32(data, fo + 6) / 65536.0,
+                "delta_intensity": _s32(data, fo + 10) / 65536.0,
+            }
+        out.append({
+            "type": _s16(data, off + 0),
+            "flags": _u16(data, off + 2),
+            "phase": _s16(data, off + 4),
+            "functions": functions,
+            "tag": _s16(data, off + 6 + 6 * 14),
+        })
+    return out
+
+
+def parse_medi(data: bytes) -> List[dict]:
+    """M2+ media (liquids) — 32 B records."""
+    out = []
+    rec_size = 32
+    for off in range(0, len(data) - (rec_size - 1), rec_size):
+        out.append({
+            "type": _s16(data, off + 0),
+            "flags": _u16(data, off + 2),
+            "light_index": _s16(data, off + 4),
+            "current_direction": _s16(data, off + 6),
+            "current_magnitude": _s16(data, off + 8),
+            "low": _s16(data, off + 10),
+            "high": _s16(data, off + 12),
+            "origin_x": _s16(data, off + 14),
+            "origin_y": _s16(data, off + 16),
+            "height": _s16(data, off + 18),
+            "min_light_intensity": _s32(data, off + 20) / 65536.0,
+            "transparent_shape": _u16(data, off + 24),
+        })
+    return out
+
+
+def parse_ambi(data: bytes) -> List[dict]:
+    """M2+ ambient sound images — 16 B records."""
+    out = []
+    rec_size = 16
+    for off in range(0, len(data) - (rec_size - 1), rec_size):
+        out.append({
+            "flags": _u16(data, off + 0),
+            "sound_index": _s16(data, off + 2),
+            "volume": _s16(data, off + 4),
+        })
+    return out
+
+
+def parse_bonk(data: bytes) -> List[dict]:
+    """M2+ random sound images — 32 B records."""
+    out = []
+    rec_size = 32
+    for off in range(0, len(data) - (rec_size - 1), rec_size):
+        out.append({
+            "flags": _u16(data, off + 0),
+            "sound_index": _s16(data, off + 2),
+            "volume": _s16(data, off + 4),
+            "delta_volume": _s16(data, off + 6),
+            "period": _s16(data, off + 8),
+            "delta_period": _s16(data, off + 10),
+            "direction": _s16(data, off + 12),
+            "delta_direction": _s16(data, off + 14),
+            "pitch": _s32(data, off + 16) / 65536.0,
+            "delta_pitch": _s32(data, off + 20) / 65536.0,
+            "phase": _s16(data, off + 24),
+        })
+    return out
+
+
+def parse_plat_m1(data: bytes) -> List[dict]:
+    """M1 platforms (`plat`) — 32 B records."""
+    out = []
+    rec_size = 32
+    for off in range(0, len(data) - (rec_size - 1), rec_size):
+        out.append({
+            "type": _s16(data, off + 0),
+            "speed": _s16(data, off + 2),
+            "delay": _s16(data, off + 4),
+            "max_height": _s16(data, off + 6),
+            "min_height": _s16(data, off + 8),
+            "static_flags": _u32(data, off + 10),
+            "polygon_index": _s16(data, off + 14),
+            "tag": _s16(data, off + 16),
+        })
+    return out
+
+
+def parse_plat_m2(data: bytes) -> List[dict]:
+    """M2+ platforms (`PLAT`) — 140 B records."""
+    out = []
+    rec_size = 140
+    for off in range(0, len(data) - (rec_size - 1), rec_size):
+        rec = {
+            "type": _s16(data, off + 0),
+            "static_flags": _u32(data, off + 2),
+            "speed": _s16(data, off + 6),
+            "delay": _s16(data, off + 8),
+            "min_floor": _s16(data, off + 10),
+            "max_floor": _s16(data, off + 12),
+            "min_ceiling": _s16(data, off + 14),
+            "max_ceiling": _s16(data, off + 16),
+            "polygon_index": _s16(data, off + 18),
+            "dynamic_flags": _u16(data, off + 20),
+            "floor_height": _s16(data, off + 22),
+            "ceiling_height": _s16(data, off + 24),
+            "ticks_until_restart": _s16(data, off + 26),
+        }
+        # 8 endpoint_owner sub-records, each 8 B (4 int16)
+        endpoint_owners = []
+        for i in range(8):
+            eo = off + 28 + i * 8
+            endpoint_owners.append({
+                "first_polygon_index": _s16(data, eo + 0),
+                "polygon_index_count": _s16(data, eo + 2),
+                "first_line_index": _s16(data, eo + 4),
+                "line_index_count": _s16(data, eo + 6),
+            })
+        rec["endpoint_owners"] = endpoint_owners
+        rec["parent_platform_index"] = _s16(data, off + 28 + 8 * 8)
+        rec["tag"] = _s16(data, off + 28 + 8 * 8 + 2)
+        out.append(rec)
     return out
 
 
@@ -224,29 +369,51 @@ def parse_terminal(data: bytes) -> List[dict]:
     return out
 
 
-# Map of chunk tag → parser function
-CHUNK_PARSERS = {
+# Chunk parsers fall into two groups: version-independent (the same on M1 and M2+)
+# and version-dependent (LITE / PLAT / plat). The dispatcher in parse_level()
+# picks the right one based on the WAD version.
+
+VERSION_INDEPENDENT_PARSERS = {
     b"EPNT": parse_epnt,
     b"PNTS": parse_pnts,
     b"LINS": parse_lins,
     b"SIDS": parse_sids,
     b"POLY": parse_poly,
-    b"LITE": parse_lite,
     b"OBJS": parse_objs,
     b"Minf": parse_minf,
     b"NAME": parse_name,
     b"term": parse_terminal,
+    # M2+ chunks (absent or empty in M1 maps so no harm in always registering)
+    b"medi": parse_medi,
+    b"ambi": parse_ambi,
+    b"bonk": parse_bonk,
+}
+
+# Tag -> (m1_parser, m2_parser). Either may be None when the chunk is unused
+# in that version.
+VERSION_DEPENDENT_PARSERS = {
+    b"LITE": (parse_lite_m1, parse_lite_m2),
+    b"plat": (parse_plat_m1, None),
+    b"PLAT": (None,          parse_plat_m2),
 }
 
 
 def parse_level(level_blob: bytes, level_entry: dict, hdr: dict) -> dict:
-    """Parse a single level's chunks into a structured dict."""
+    """Parse a single level's chunks into a structured dict.
+
+    Dispatches LITE / PLAT / plat parsers based on the WAD version (0 = M1,
+    >=1 = M2/Infinity).
+    """
     chunks_raw = {}
     parsed = {}
+    is_m1 = hdr["version"] < 1
     for tag, data in wad.read_chunks(level_blob, level_entry, hdr["entry_header_size"]):
         tag_name = wad.tag_str(tag)
         chunks_raw[tag_name] = len(data)
-        parser = CHUNK_PARSERS.get(tag)
+        parser = VERSION_INDEPENDENT_PARSERS.get(tag)
+        if parser is None and tag in VERSION_DEPENDENT_PARSERS:
+            m1_parser, m2_parser = VERSION_DEPENDENT_PARSERS[tag]
+            parser = m1_parser if is_m1 else m2_parser
         if parser is not None:
             try:
                 parsed[tag_name] = parser(data)

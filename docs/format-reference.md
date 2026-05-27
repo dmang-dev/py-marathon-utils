@@ -1,11 +1,23 @@
-# Marathon 1 Binary Format Reference
+# Marathon Binary Format Reference
 
-Byte-level layouts for the four Aleph One M1 data files. All multi-byte fields
-are **big-endian**. Strings are **MacRoman**. "Fixed" = signed 32-bit
+Byte-level layouts for the data files in all three Aleph One Marathon
+releases (M1A1, Marathon 2, Marathon Infinity). All multi-byte fields are
+**big-endian**. Strings are **MacRoman**. "Fixed" = signed 32-bit
 fixed-point (divide by 65536 for float).
 
 These notes were the basis for the Python parsers in this repo. If you're
 implementing a Marathon reader in another language, start here.
+
+### File extensions
+
+| Game | Map | Shapes | Sounds | Wrapper |
+|---|---|---|---|---|
+| Marathon 1 | `Map.scen` | `Shapes.shps` | `Sounds.sndz` | MacBinary II |
+| Marathon 2 | `Map.sceA` | `Shapes.shpA` | `Sounds.sndA` | M2 sounds: raw (`snd2`); M2 shapes: raw |
+| Marathon Infinity | `Map.sceA` | `Shapes.shpA` | `Sounds.sndA` | (same as M2) |
+
+Map files for all three versions ship MacBinary II-wrapped. Shapes and Sounds
+are MacBinary II only on M1; M2/Infinity store them as raw container files.
 
 ## File-by-file detection
 
@@ -159,9 +171,7 @@ Key fields for geometry:
 | 116 | int16 | media_index |
 | 122 | int16 | ambient_sound_image_index |
 
-### `LITE` — lights (M1, 32 B each)
-
-M2's record is 80+ B and incompatible. M1 layout:
+### `LITE` — lights (M1: 32 B each)
 
 | Off | Type | Field |
 |---|---|---|
@@ -174,6 +184,65 @@ M2's record is 80+ B and incompatible. M1 layout:
 | 16 | int16 | period |
 | 18 | Fixed | intensity |
 | 22 | 10 B | padding |
+
+### `LITE` — lights (M2 / Infinity: 100 B each)
+
+Completely different layout. Six "function" blocks describe how the light
+behaves in each state (active vs inactive; primary, secondary, transitions):
+
+| Off | Type | Field |
+|---|---|---|
+| 0 | int16 | type |
+| 2 | uint16 | flags |
+| 4 | int16 | phase |
+| 6 | 14 B | primary_active function block |
+| 20 | 14 B | secondary_active function block |
+| 34 | 14 B | becoming_active function block |
+| 48 | 14 B | primary_inactive function block |
+| 62 | 14 B | secondary_inactive function block |
+| 76 | 14 B | becoming_inactive function block |
+| 90 | int16 | tag |
+| 92 | 8 B | padding |
+
+Each 14-byte function block:
+
+| Off | Type | Field |
+|---|---|---|
+| 0 | int16 | function |
+| 2 | int16 | period |
+| 4 | int16 | delta_period |
+| 6 | Fixed | intensity |
+| 10 | Fixed | delta_intensity |
+
+### M2+ `medi`, `ambi`, `bonk`
+
+- **`medi`** (32 B): liquids/media. `type, flags, light_index, current_direction,
+  current_magnitude, low, high, origin_x, origin_y, height,
+  min_light_intensity (Fixed), transparent_shape (uint16)`.
+- **`ambi`** (16 B): ambient sound images. `flags, sound_index, volume`,
+  + 10 B padding.
+- **`bonk`** (32 B): random sound images. `flags, sound_index, volume,
+  delta_volume, period, delta_period, direction, delta_direction,
+  pitch (Fixed), delta_pitch (Fixed), phase`.
+
+### M2+ `PLAT` — platforms (140 B each)
+
+Replaces M1's smaller `plat` (32 B) chunk. Adds 8 `endpoint_owner` records
+(8 B each) tracking which polygons/lines move with the platform.
+
+### Infinity-only physics chunks
+
+Marathon Infinity embeds **per-level physics models** so each level can
+customize gameplay. The chunks are:
+
+- `MNpx` — monster definitions
+- `FXpx` — effect definitions
+- `PRpx` — projectile definitions
+- `PXpx` — physics constants
+- `WPpx` — weapon definitions
+
+py-marathon-utils preserves these as raw bytes for now (per-record decoding
+is TBD — see `map2xml.pl` lines 572–812 for the field layouts).
 
 ### `OBJS` — object placements (16 B each)
 
@@ -229,11 +298,35 @@ ue_cm = (int16_value / 1024.0) * 100
 
 A typical Marathon corridor (1 WU wide) is 100 UE cm.
 
-## Shapes.shps (M1)
+## Shapes.shps / Shapes.shpA
 
-Lives entirely in the rsrc fork. The fork contains `.256` resources for
-collections (IDs 128–159, mapping to collections 0–31), plus `PICT` and `clut`
-resources used by chapter screens and the system.
+Two completely different container layouts share the same per-collection
+header structure.
+
+### M1: lives in the rsrc fork
+
+The MacBinary rsrc fork contains `.256` resources for collections (IDs
+128–159, mapping to collections 0–31), plus `PICT` and `clut` resources used
+by chapter screens and the system.
+
+### M2/Infinity: flat 32-entry table
+
+The file is NOT MacBinary-wrapped. It begins with a 32-entry collection-info
+table (32 bytes per entry = 1024 bytes total):
+
+| Off | Size | Field |
+|---|---|---|
+| 0 | 2 | status (int16) |
+| 2 | 2 | flags (uint16) |
+| 4 | 4 | off8 — offset to 8-bit collection (int32) |
+| 8 | 4 | len8 — length of 8-bit collection |
+| 12 | 4 | off16 — offset to 16-bit collection |
+| 16 | 4 | len16 — length of 16-bit collection |
+| 20 | 12 | padding |
+
+After the table, the actual collection payloads live at `off8`/`off16`. Each
+collection has the same 560-byte header described below, but the bitmap
+encoding differs (M2 uses column-major sparse, not int16-opcode RLE).
 
 ### `.256` (collection) payload
 
@@ -290,6 +383,19 @@ For each row (or column, if `column-order`), a stream of `int16` opcodes:
 - `opcode < 0`: skip `-opcode` bytes (already zero-filled)
 - `opcode == 0`: end of line
 
+### M2 / Infinity sparse format
+
+Used when `bytes_per_row == -1`. Column-major: for each column (0..width-1):
+
+```
+int16 first_row
+int16 last_row
+bytes[last_row - first_row]  ← raw pixel indices for rows [first_row, last_row)
+```
+
+Rows outside `[first_row, last_row)` are transparent (or palette index 0).
+- `opcode == 0`: end of line
+
 Index 0 = transparent if the transparent flag is set.
 
 ### Effective view counts (high-level shapes)
@@ -341,6 +447,50 @@ For each command (8 B):
 | 22 | bytes | sample data: `length` bytes of **unsigned 8-bit PCM** |
 
 To convert to 16-bit signed WAV: `int16_sample = (uint8_byte - 128) * 256`.
+
+## Sounds.sndA (M2 / Infinity)
+
+Custom `snd2` container, not MacBinary. Header is 264 bytes total:
+
+| Off | Size | Field |
+|---|---|---|
+| 0 | 4 | version (int32, 0 or 1) |
+| 4 | 4 | tag (`'snd2'`) |
+| 8 | 2 | source_count (int16) |
+| 10 | 2 | sound_count (int16; if zero, treat source_count as sound_count and source_count=1) |
+| 12 | 252 | unused / reserved |
+
+Then `source_count * sound_count` sound metadata records (64 bytes each):
+
+| Off | Size | Field |
+|---|---|---|
+| 0 | 2 | code (int16; -1 = empty slot) |
+| 2 | 2 | behaviour_index (int16) |
+| 4 | 2 | flags (uint16) |
+| 6 | 2 | chance (uint16) |
+| 8 | 4 | low_pitch (Fixed) |
+| 12 | 2 | permutations_count (int16) |
+| 14 | 2 | permutations_played (int16) |
+| 16 | 4 | **group_offset** — absolute file offset of permutation data (int32) |
+| 20 | 4 | single_length (int32) — bytes per permutation incl. header |
+| 24 | 4 | total_length (int32) — sum across permutations |
+| 28 | 20 | offsets[5] (int32 each) — distance from group_offset to each permutation |
+| 48 | 4 | last_played (uint32) |
+| 52 | 12 | private state / padding |
+
+⚠️ The Common Lisp `aleph-one-sound-unpacker` assumes a slightly different
+layout (a `high_pitch` Fixed at bytes 12–15) and treats `group_offset` as a
+file-position relative to current — that layout doesn't match current Aleph
+One M2A1/MI sndA files. We use the layout above, verified empirically by
+tracing `group_offset` values to actual Mac sound header positions.
+
+Permutation data at `group_offset + offsets[i]` is a classic Mac sound header
+(see "Standard sound header" above). M2/Infinity may use stdSH (0x00), extSH
+(0xFF, multi-channel/16-bit), or cmpSH "twos" (0xFE, signed 8-bit). The
+encoding byte lives 20 bytes into the header.
+
+The two sources are typically two quality levels (high-fi vs lo-fi) of the
+same sound — extractors should output them in separate subdirectories.
 
 ## Physics.phys
 
