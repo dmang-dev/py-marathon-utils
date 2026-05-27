@@ -398,18 +398,34 @@ VERSION_DEPENDENT_PARSERS = {
 }
 
 
+_EMBEDDED_PHYSICS_TAGS = (b"MNpx", b"FXpx", b"PRpx", b"PXpx", b"WPpx")
+
+
 def parse_level(level_blob: bytes, level_entry: dict, hdr: dict) -> dict:
     """Parse a single level's chunks into a structured dict.
 
     Dispatches LITE / PLAT / plat parsers based on the WAD version (0 = M1,
-    >=1 = M2/Infinity).
+    >=1 = M2/Infinity). Infinity's embedded physics chunks (MNpx/FXpx/PRpx/
+    PXpx/WPpx) are decoded too when `physics` is importable.
     """
     chunks_raw = {}
     parsed = {}
     is_m1 = hdr["version"] < 1
+
+    # Defer physics import to avoid a hard module dep loop and let users skip
+    # physics decoding by simply not importing it.
+    try:
+        from . import physics as _physics
+    except Exception:  # pragma: no cover
+        _physics = None
+
+    physics_chunks: dict[bytes, bytes] = {}
     for tag, data in wad.read_chunks(level_blob, level_entry, hdr["entry_header_size"]):
         tag_name = wad.tag_str(tag)
         chunks_raw[tag_name] = len(data)
+        if tag in _EMBEDDED_PHYSICS_TAGS:
+            physics_chunks[tag] = data
+            continue
         parser = VERSION_INDEPENDENT_PARSERS.get(tag)
         if parser is None and tag in VERSION_DEPENDENT_PARSERS:
             m1_parser, m2_parser = VERSION_DEPENDENT_PARSERS[tag]
@@ -419,6 +435,13 @@ def parse_level(level_blob: bytes, level_entry: dict, hdr: dict) -> dict:
                 parsed[tag_name] = parser(data)
             except Exception as e:
                 parsed[tag_name] = {"_error": str(e), "_bytes": len(data)}
+
+    if physics_chunks and _physics is not None:
+        try:
+            parsed["embedded_physics"] = _physics.decode_embedded_physics(physics_chunks)
+        except Exception as e:
+            parsed["embedded_physics"] = {"_error": str(e)}
+
     return {
         "index": level_entry["index"],
         "wad_offset": level_entry["offset"],

@@ -6,6 +6,24 @@ All notable changes to py-marathon-utils. Format follows
 
 ## [Unreleased]
 
+### Added — Strings and full physics decoding
+
+- `strings`: new module ports `strings2xml.pl`. Reads `STR `, `STR#`, `TEXT`,
+  and Marathon 1's `term` (human-readable terminal script) resources from any
+  Mac resource fork. Optional `to_mml()` helper emits Aleph One MML
+  `<stringset>` blocks. Big use case: pulling the per-level terminal lore
+  out of `Marathon.appl` that the M1 level WADs don't carry.
+- `physics`: full per-record decoders for MNpx (monsters, 156 B), FXpx
+  (effects, 14 B), PRpx (projectiles, 48 B), PXpx (player physics constants,
+  104 B), and WPpx (weapons, 134 B = 62 main + 2 × 36 triggers). Works on
+  M2/Infinity `Standard.phyA` and on Infinity's per-level embedded chunks
+  via `decode_embedded_physics()`.
+- `maps`: per-level `embedded_physics` dict now appears in Infinity level
+  JSON, decoded via the new physics module. Other Marathon versions are
+  unaffected.
+- CLI: new `marathon-utils extract strings <Marathon.appl> <out>` subcommand.
+- 17 new tests in `test_strings.py` + `test_physics.py`.
+
 ### Added — Marathon 2 / Infinity support
 
 - `maps`: version-aware chunk parsing. M2/Infinity LITE records (100 B, six

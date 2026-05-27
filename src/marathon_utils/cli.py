@@ -31,6 +31,8 @@ def _cmd_extract(args: argparse.Namespace) -> int:
         from . import sounds as mod
     elif kind == "physics":
         from . import physics as mod
+    elif kind == "strings":
+        from . import strings as mod
     elif kind == "shapes":
         try:
             from . import shapes as mod
@@ -73,8 +75,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    ex = sub.add_parser("extract", help="extract one of the M1 data files")
-    ex.add_argument("kind", choices=["maps", "sounds", "shapes", "physics"],
+    ex = sub.add_parser("extract", help="extract one of the Marathon data files")
+    ex.add_argument("kind", choices=["maps", "sounds", "shapes", "physics", "strings"],
                     help="which file type to extract")
     ex.add_argument("source", help="path to the input file (e.g. Map.scen)")
     ex.add_argument("dest", help="output directory")

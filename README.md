@@ -46,6 +46,12 @@ marathon-utils extract maps    Map.sceA    out/Maps
 marathon-utils extract sounds  Sounds.sndA out/Sounds
 marathon-utils extract shapes  Shapes.shpA out/Shapes
 marathon-utils visualize       Map.sceA    out/PNG
+
+# Physics models (M2/Infinity Standard.phyA — fully decoded per-record JSON)
+marathon-utils extract physics "Standard.phyA"  out/Physics
+
+# Strings + terminal lore (Marathon.appl resource fork)
+marathon-utils extract strings  Marathon.appl   out/Strings
 ```
 
 Format auto-detection means you don't need to tell the CLI which Marathon
@@ -81,7 +87,8 @@ for lev in result['levels'][:3]:
 | `Map.scen` / `Map.sceA` | `marathon_utils.maps` | per-level JSON (geometry, lights, objects, terminal text) | ✅ M1 + M2 + Infinity |
 | `Sounds.sndz` / `Sounds.sndA` | `marathon_utils.sounds` | 16-bit WAV files | ✅ M1 (Mac rsrc) + M2/Infinity (snd2) |
 | `Shapes.shps` / `Shapes.shpA` | `marathon_utils.shapes` | per-collection palette + per-shape PNG | ✅ M1 (RLE) + M2/Infinity (sparse) |
-| `Physics.phys` | `marathon_utils.physics` | raw passthrough + manifest | 🟡 Stub (no per-record decode) |
+| `Standard.phyA` / `Physics.phys` | `marathon_utils.physics` | per-record JSON (monsters, weapons, projectiles, effects, player physics) | ✅ M2 + Infinity; M1 falls back to raw |
+| `Marathon.appl` (resource fork) | `marathon_utils.strings` | STR / STR# / TEXT / M1 terminal scripts | ✅ |
 | any WAD | `marathon_utils.wad` | walk chunks programmatically | ✅ M1 v0 + M2 v2 + Infinity v4 |
 | MacBinary II | `marathon_utils.macbinary` | unwrap to data+rsrc forks | ✅ |
 | Mac OS resource fork | `marathon_utils.macrsrc` | typed `{resource_type: [{id, name, data}, ...]}` | ✅ |
@@ -114,10 +121,12 @@ level as a PNG suitable for level-design review.
 These exist in the upstream Perl marathon-utils but aren't ported. PRs welcome:
 
 - Anvil-format patch files (`patch2xml.pl`, `xml2patch.pl`, `applypatch.pl`)
-- Resource → MML conversion (`rsrc2mml.pl`)
+- Resource → MML conversion (`rsrc2mml.pl`) — but `strings.to_mml()` covers the
+  string-set portion of this
 - Marathon 2 Preview Shapes (`prevshapes2xml.pl`) — historical/niche
-- Per-record decoding of `Physics.phys` (M1) and the embedded physics chunks
-  (Infinity) — both currently preserve raw bytes
+- Per-record decoding of M1's older `Physics.phys` format — we decode M2/MI
+  physics chunks (MNpx/FXpx/PRpx/PXpx/WPpx) but M1 ships a smaller `mons`
+  record that needs its own port
 - 16-bit shape banks (M2/Infinity ships an 8-bit and 16-bit version of each
   collection; we render the 8-bit bank, which carries the canonical sprites)
 - `Images.imgA` (M2/Infinity chapter screens and title art) — separate format
