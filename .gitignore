@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.tox/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Output from running examples on real data (Bungie IP — don't commit)
+sample-data/
+out/
+*.scen
+*.shps
+*.sndz
+*.phys
+*.appl
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

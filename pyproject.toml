@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py-marathon-utils"
+version = "0.1.0"
+description = "Read Bungie Marathon / Aleph One data files (maps, shapes, sounds) in pure Python."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+authors = [
+    { name = "dmang-dev" },
+]
+keywords = ["marathon", "bungie", "aleph-one", "wad", "macbinary", "retro-gaming", "modding"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Games/Entertainment :: First Person Shooters",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Archiving",
+]
+
+[project.optional-dependencies]
+images = ["Pillow>=9.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "Pillow>=9.0",
+    "ruff>=0.4",
+    "mypy>=1.5",
+]
+
+[project.scripts]
+marathon-utils = "marathon_utils.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/dmang-dev/py-marathon-utils"
+Repository = "https://github.com/dmang-dev/py-marathon-utils"
+Issues = "https://github.com/dmang-dev/py-marathon-utils/issues"
+Reference = "https://github.com/Aleph-One-Marathon/alephone"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --strict-markers"
+markers = [
+    "needs_sample_data: tests that require a real Marathon data file on disk",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+ignore = ["E501"]  # long lines OK in byte-layout docstrings
+
+[tool.mypy]
+python_version = "3.8"
+warn_unused_ignores = true
+warn_redundant_casts = true

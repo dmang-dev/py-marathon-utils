@@ -1,0 +1,10 @@
+# Normalize line endings in the repo to LF; checkout uses the OS default.
+* text=auto eol=lf
+
+# Force binary so git doesn't munge .png test outputs or vendored Perl modules
+*.png       binary
+*.pm        text eol=lf
+
+# Vendored marathon-utils carries upstream as-is; mark it as vendored for
+# GitHub's language statistics and code-review skip.
+vendor/**           linguist-vendored
