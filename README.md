@@ -151,6 +151,15 @@ and compares its XML output to ours. Currently bit-exact for all M1 maps.
 pytest tests/test_perl_parity.py -v
 ```
 
+The Anvil patches module is additionally validated against a real community
+patch from Simplici7y (the CTF Flag Shapes Patch by Juice — 67×148 flag
+sprites at items[14] and items[15]). Run this once to fetch it:
+
+```bash
+python scripts/fetch_sample_patches.py
+pytest tests/test_patches.py::test_real_world_ctf_flag_patch -v
+```
+
 ## License
 
 [MIT](LICENSE). Use it for whatever — modding, ports, ROM-archaeology, your

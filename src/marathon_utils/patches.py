@@ -110,8 +110,13 @@ def parse(blob: bytes) -> dict:
                 break
 
             if tag == b"cldf":
-                hdr_bytes = blob[pos: pos + 560]
-                pos += 560
+                # cldf payload = 38 B of fields + 506 B padding = 544 B total.
+                # (The shapes-file collection header is the same 544 B; the
+                # often-cited "560" figure includes the four bytes of the
+                # outer resource length-prefix that don't apply here.)
+                CLDF_SIZE = 544
+                hdr_bytes = blob[pos: pos + CLDF_SIZE]
+                pos += CLDF_SIZE
                 hdr = _shapes.parse_collection_header(hdr_bytes)
                 coll["definition"] = hdr
                 color_count = hdr["color_count"]

@@ -19,6 +19,8 @@ All notable changes to py-marathon-utils. Format follows
   `patch2xml.pl`. Includes a working `apply()` that overlays a patch onto a
   parsed shapes result — the upstream `applypatch.pl` only stubbed this with
   a `# tbd` comment, so this is functionality beyond the Perl reference.
+  Validated against a real community patch (CTF Flag Shapes Patch from
+  Simplici7y) — see `scripts/fetch_sample_patches.py`.
 - CLI: new `marathon-utils extract patches <patch-file> <out>` subcommand.
 - 8 more tests (4 patches + updated M1 physics).
 

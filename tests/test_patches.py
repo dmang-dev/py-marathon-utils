@@ -6,6 +6,7 @@ build synthetic minimal patches from scratch and verify round-trips.
 from __future__ import annotations
 
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -95,14 +96,49 @@ def test_apply_skips_collections_not_in_base():
     assert result["summary"]["details"][0]["skipped"] == "not in base"
 
 
+def test_real_world_ctf_flag_patch():
+    """Cross-check against a real community patch from Simplici7y.
+
+    Source: https://simplici7y.com/items/ctf-flag-shapes-patch-4/
+    Format: Anvil patch — replaces items[14] and items[15] with bigger CTF flags.
+    The .zip with the patch is bundled in sample-data/ for offline testing.
+    """
+    import zipfile
+    zip_path = Path(__file__).resolve().parent.parent / "sample-data" / "CTF_Flag_Shapes_Patch.zip"
+    if not zip_path.is_file():
+        pytest.skip(f"CTF flag patch not bundled at {zip_path}")
+    blob = zipfile.ZipFile(zip_path).read("CTF Flag Shapes Patch")
+    result = patches.parse(blob)
+
+    # 37 collection slots in the patch, 36 are empty placeholders
+    assert len(result["collections"]) == 37
+    non_empty = [c for c in result["collections"]
+                 if c["definition"] or c["bitmaps"]]
+    assert len(non_empty) == 1
+
+    coll = non_empty[0]
+    assert coll["index"] == 7        # M2/Infinity "Items" collection
+    assert coll["bit_depth"] == 8
+    assert coll["definition"] is not None
+    # Two replacement bitmaps — the red flag and the blue flag
+    assert len(coll["bitmaps"]) == 2
+    assert {b["index"] for b in coll["bitmaps"]} == {14, 15}
+    for b in coll["bitmaps"]:
+        assert b["bitmap"].width == 67
+        assert b["bitmap"].height == 148
+        # Real sprite — should have meaningful opaque pixels (~25% per visual check)
+        nonzero = sum(1 for px in b["bitmap"].indices if px != 0)
+        assert nonzero > 1000
+
+
 def test_parse_color_table_after_cldf():
     """ctab follows cldf so the parser knows color_count."""
     out = bytearray()
     out += struct.pack(">II", 0, 8)  # collection 0, depth 8
-    # cldf with color_count = 4
+    # cldf with color_count = 4. Payload is 544 B (38 fields + 506 padding).
     out += b"cldf"
-    cldf = bytearray(560)
-    # collection header: version, type, flags, color_count
+    cldf = bytearray(544)
+    # collection header: version, type, flags, color_count, clut_count
     struct.pack_into(">hhHhh", cldf, 0, 0, 0, 0, 4, 1)
     out += bytes(cldf)
     # ctab: int32 index, then 4 colors of 8 bytes

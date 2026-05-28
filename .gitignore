@@ -20,6 +20,7 @@ htmlcov/
 .ruff_cache/
 
 # Output from running examples on real data (Bungie IP — don't commit)
+# scripts/fetch_sample_patches.py will populate sample-data/ on demand.
 sample-data/
 out/
 *.scen
