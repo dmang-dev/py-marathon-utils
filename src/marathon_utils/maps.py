@@ -330,9 +330,30 @@ def parse_name(data: bytes) -> str:
     return data.split(b"\x00", 1)[0].decode("mac-roman", "replace")
 
 
+# Terminal group type names — index into the `groupings[].type` field. These
+# correspond to the Marathon engine's terminal-screen kinds (logon screen, info
+# page, picture insert, etc.). Only a few are actually rendered.
+TERMINAL_GROUP_TYPES = (
+    "logon", "unfinished", "success", "failure", "information", "end",
+    "interlevel_teleport", "intralevel_teleport", "checkpoint",
+    "sound", "movie", "track", "pict", "logoff", "camera", "static", "tag",
+)
+
+
 def parse_terminal(data: bytes) -> List[dict]:
     """Terminal data — each terminal: 10 B header, then groupings, font changes, text.
+
     Text may be XOR-obfuscated (flags bit 0). De-obfuscate per map2xml.pl.
+
+    Returns a list of terminal dicts, each with::
+
+        {
+          "flags": int, "lines_per_page": int,
+          "groupings": [{flags, type, type_name, permutation, start_index, length, max_lines}, ...],
+          "font_changes": [{change_index, face, color, font_index, bold, italic, underline}, ...],
+          "text_bytes": bytes,    # de-obfuscated MacRoman bytes
+          "text": str,            # same as text_bytes, decoded
+        }
     """
     out = []
     pos = 0
@@ -342,10 +363,50 @@ def parse_terminal(data: bytes) -> List[dict]:
         lines_per_page = _s16(data, pos + 4)
         grouping_count = _u16(data, pos + 6)
         fontchange_count = _u16(data, pos + 8)
-        body_start = pos + 10 + grouping_count * 12 + fontchange_count * 6
+
+        grouping_off = pos + 10
+        fontchange_off = grouping_off + grouping_count * 12
+        body_start = fontchange_off + fontchange_count * 6
         body_end = pos + total_length
         if body_end > len(data) or body_start > body_end:
             break
+
+        groupings = []
+        for gi in range(grouping_count):
+            g_off = grouping_off + gi * 12
+            g_flags = _u16(data, g_off + 0)
+            g_type = _s16(data, g_off + 2)
+            g_permutation = _s16(data, g_off + 4)
+            g_start = _s16(data, g_off + 6)
+            g_length = _s16(data, g_off + 8)
+            g_max_lines = _s16(data, g_off + 10)
+            groupings.append({
+                "flags": g_flags,
+                "type": g_type,
+                "type_name": TERMINAL_GROUP_TYPES[g_type]
+                              if 0 <= g_type < len(TERMINAL_GROUP_TYPES) else f"unknown_{g_type}",
+                "permutation": g_permutation,
+                "start_index": g_start,
+                "length": g_length,
+                "max_lines": g_max_lines,
+            })
+
+        font_changes = []
+        for fi in range(fontchange_count):
+            f_off = fontchange_off + fi * 6
+            change_index = _s16(data, f_off + 0)
+            face = _s16(data, f_off + 2)
+            color = _s16(data, f_off + 4)
+            font_changes.append({
+                "change_index": change_index,
+                "face": face,
+                "color": color,
+                "font_index": face & 0x3,   # bits 0-1 = font (plain/bold/italic/bold-italic)
+                "bold": bool(face & 0x1),
+                "italic": bool(face & 0x2),
+                "underline": bool(face & 0x4),
+            })
+
         text_bytes = bytearray(data[body_start: body_end])
         if flags & 1:
             # De-obfuscate: XOR bytes 2 and 3 of every 4-byte block, plus tail
@@ -356,11 +417,12 @@ def parse_terminal(data: bytes) -> List[dict]:
                 text_bytes[i + 3] ^= 0xED
             for i in range(full_blocks, n):
                 text_bytes[i] ^= 0xFE
+
         out.append({
             "flags": flags,
             "lines_per_page": lines_per_page,
-            "grouping_count": grouping_count,
-            "fontchange_count": fontchange_count,
+            "groupings": groupings,
+            "font_changes": font_changes,
             "text": bytes(text_bytes).decode("mac-roman", errors="replace"),
         })
         pos = body_end

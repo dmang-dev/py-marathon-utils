@@ -39,6 +39,12 @@ def _cmd_extract(args: argparse.Namespace) -> int:
         except ImportError as e:  # pragma: no cover
             print(f"ERROR: patches reader needs Pillow: {e}", file=sys.stderr)
             return 3
+    elif kind == "terminals":
+        try:
+            from . import terminals as mod
+        except ImportError as e:  # pragma: no cover
+            print(f"ERROR: terminal renderer needs Pillow: {e}", file=sys.stderr)
+            return 3
     elif kind == "shapes":
         try:
             from . import shapes as mod
@@ -82,7 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     ex = sub.add_parser("extract", help="extract one of the Marathon data files")
-    ex.add_argument("kind", choices=["maps", "sounds", "shapes", "physics", "strings", "patches"],
+    ex.add_argument("kind", choices=["maps", "sounds", "shapes", "physics",
+                                      "strings", "patches", "terminals"],
                     help="which file type to extract")
     ex.add_argument("source", help="path to the input file (e.g. Map.scen)")
     ex.add_argument("dest", help="output directory")

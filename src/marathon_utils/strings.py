@@ -63,6 +63,93 @@ def parse_text(payload: bytes) -> str:
     return payload.decode("mac-roman", errors="replace")
 
 
+# ---------------------------------------------------------------------------
+# Interface resources used by rsrc2mml.pl: clut (colors), nrct (rectangles),
+# finf (font info). These define HUD layout and terminal styling that Aleph
+# One MML can override.
+# ---------------------------------------------------------------------------
+
+# Per the upstream M1 → M2 MML index remap table:
+_M1_COLOR_LOOKUP = [*range(14), -1, 16, 17, 14, 15]
+_M1_RECT_LOOKUP = (
+    [-1, -1, -1, -1, -1,
+     0, 1, 2, 3, 4,
+     -1, 30, 5, 6,
+     -1, -1, -1, -1, -1,
+     21, 22, 20, 23, 24, 25, 26, 27, 28, 29,
+     7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+     -1, -1, -1]
+)
+
+
+def parse_clut(payload: bytes, is_m1: bool = False) -> list[dict]:
+    """Decode a Mac `clut` resource into a list of interface color overrides.
+
+    Returns `[{"index": int, "red": float, "green": float, "blue": float}, ...]`
+    where colors are 0.0..1.0. The 5000-style header is skipped; for M1 the
+    indices are remapped to their M2/Infinity equivalents.
+    """
+    if len(payload) < 8:
+        return []
+    # 6 bytes header skip + uint16 count_minus_1
+    count = struct.unpack(">H", payload[6:8])[0] + 1
+    out: list[dict] = []
+    pos = 8
+    for i in range(count):
+        if pos + 8 > len(payload):
+            break
+        # 2 bytes per-entry padding + 6 bytes RGB
+        r, g, b = struct.unpack(">HHH", payload[pos + 2: pos + 8])
+        pos += 8
+        idx = _M1_COLOR_LOOKUP[i] if is_m1 and i < len(_M1_COLOR_LOOKUP) else i
+        if idx < 0:
+            continue
+        out.append({
+            "index": idx,
+            "red": r / 65535,
+            "green": g / 65535,
+            "blue": b / 65535,
+        })
+    return out
+
+
+def parse_nrct(payload: bytes, is_m1: bool = False) -> list[dict]:
+    """Decode a Mac `nrct` resource (network/UI rectangles)."""
+    if len(payload) < 2:
+        return []
+    count = struct.unpack(">H", payload[0:2])[0]
+    out: list[dict] = []
+    pos = 2
+    for i in range(count):
+        if pos + 8 > len(payload):
+            break
+        top, left, bottom, right = struct.unpack(">hhhh", payload[pos: pos + 8])
+        pos += 8
+        idx = _M1_RECT_LOOKUP[i] if is_m1 and i < len(_M1_RECT_LOOKUP) else i
+        if idx < 0:
+            continue
+        out.append({"index": idx, "top": top, "left": left,
+                    "bottom": bottom, "right": right})
+    return out
+
+
+def parse_finf(payload: bytes) -> list[dict]:
+    """Decode a `finf` (font info) resource."""
+    if len(payload) < 2:
+        return []
+    count = struct.unpack(">H", payload[0:2])[0]
+    out: list[dict] = []
+    pos = 2
+    for i in range(count):
+        if pos + 6 > len(payload):
+            break
+        file_id, style, size = struct.unpack(">HHH", payload[pos: pos + 6])
+        pos += 6
+        out.append({"index": i, "file": f"#{file_id}",
+                    "style": style, "size": size})
+    return out
+
+
 def parse_m1_terminal_resource(payload: bytes) -> str:
     """Decode a Marathon 1 `term` resource as human-readable script text.
 
@@ -99,7 +186,14 @@ def extract(source_path: Path | str, dest_dir: Path | str | None = None) -> dict
 
     resources = macrsrc.parse(rsrc)
 
-    result: dict = {"STR": {}, "STR#": {}, "TEXT": {}, "term": {}}
+    # Detect M1 vs M2: M1 has `clut` id 129 as a marker
+    is_m1 = any(e["id"] == 129 for e in resources.get("clut", []))
+
+    result: dict = {
+        "STR": {}, "STR#": {}, "TEXT": {}, "term": {},
+        "interface": {"color": [], "rect": [], "font": []},
+        "is_m1": is_m1,
+    }
     for entry in resources.get("STR ", []):
         result["STR"][entry["id"]] = parse_str(entry["data"])
     for entry in resources.get("STR#", []):
@@ -111,6 +205,21 @@ def extract(source_path: Path | str, dest_dir: Path | str | None = None) -> dict
         # WAD chunks. If the payload begins with ASCII `;` it's the M1 form.
         if entry["data"] and entry["data"][:1] in (b";", b"#"):
             result["term"][entry["id"]] = parse_m1_terminal_resource(entry["data"])
+
+    # Interface overrides: clut 130 (M2) or clut 129 (M1 marker variant);
+    # nrct 128; finf 128. These let Aleph One MML override HUD layout.
+    for entry in resources.get("clut", []):
+        if entry["id"] in (129, 130):
+            result["interface"]["color"] = parse_clut(entry["data"], is_m1=is_m1)
+            break
+    for entry in resources.get("nrct", []):
+        if entry["id"] == 128:
+            result["interface"]["rect"] = parse_nrct(entry["data"], is_m1=is_m1)
+            break
+    for entry in resources.get("finf", []):
+        if entry["id"] == 128:
+            result["interface"]["font"] = parse_finf(entry["data"])
+            break
 
     if dest_dir is not None:
         dest = Path(dest_dir)
@@ -147,15 +256,36 @@ def extract(source_path: Path | str, dest_dir: Path | str | None = None) -> dict
 
 
 def to_mml(strings: dict, *, encoding_marker: bool = True) -> str:
-    """Render an extract() result as Aleph One MML <stringset> blocks.
+    """Render an extract() result as Aleph One MML XML.
 
-    This is the format `rsrc2mml.pl` produces; useful for repackaging into
-    scenario plugins or as override stringsets in scripted scenarios.
+    Produces the same output as `rsrc2mml.pl`: an `<interface>` block with
+    color/rect/font overrides plus one `<stringset>` per STR# resource.
+    Useful for repackaging into scenario plugins or as override stringsets
+    in scripted scenarios.
     """
     out: list[str] = []
     if encoding_marker:
         out.append('<?xml version="1.0"?>')
         out.append('<marathon>')
+
+    iface = strings.get("interface", {})
+    has_iface = any(iface.get(k) for k in ("color", "rect", "font"))
+    if has_iface:
+        out.append('  <interface>')
+        for c in iface.get("color", []):
+            out.append(f'    <color index="{c["index"]}" '
+                        f'red="{c["red"]:.5f}" green="{c["green"]:.5f}" '
+                        f'blue="{c["blue"]:.5f}"/>')
+        for r in iface.get("rect", []):
+            out.append(f'    <rect index="{r["index"]}" '
+                        f'top="{r["top"]}" left="{r["left"]}" '
+                        f'bottom="{r["bottom"]}" right="{r["right"]}"/>')
+        for f in iface.get("font", []):
+            out.append(f'    <font index="{f["index"]}" '
+                        f'file="{f["file"]}" style="{f["style"]}" '
+                        f'size="{f["size"]}"/>')
+        out.append('  </interface>')
+
     for sid, entries in sorted(strings.get("STR#", {}).items()):
         out.append(f'  <stringset index="{sid}">')
         for i, s in enumerate(entries):

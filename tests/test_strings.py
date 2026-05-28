@@ -44,6 +44,60 @@ def test_parse_m1_terminal_resource_normalizes_line_endings():
 pytestmark_int = pytest.mark.needs_sample_data
 
 
+def test_parse_clut_decodes_color_entries():
+    import struct
+    # 6 bytes skip + uint16 count_minus_1 + entries (2 pad + 6 RGB each)
+    payload = b"\x00" * 6 + struct.pack(">H", 1)  # count = 2
+    payload += b"\x00\x00" + struct.pack(">HHH", 0xFFFF, 0, 0)         # red
+    payload += b"\x00\x00" + struct.pack(">HHH", 0, 0xFFFF, 0)         # green
+    colors = strings.parse_clut(payload)
+    assert len(colors) == 2
+    assert colors[0]["red"] == 1.0 and colors[0]["green"] == 0.0
+    assert colors[1]["green"] == 1.0
+
+
+def test_parse_nrct_decodes_rectangle_entries():
+    import struct
+    payload = struct.pack(">H", 2)  # count
+    payload += struct.pack(">hhhh", 10, 20, 30, 40)
+    payload += struct.pack(">hhhh", -5, -10, -15, -20)
+    rects = strings.parse_nrct(payload)
+    assert rects == [
+        {"index": 0, "top": 10, "left": 20, "bottom": 30, "right": 40},
+        {"index": 1, "top": -5, "left": -10, "bottom": -15, "right": -20},
+    ]
+
+
+def test_parse_finf_decodes_font_entries():
+    import struct
+    payload = struct.pack(">H", 2)  # count
+    payload += struct.pack(">HHH", 4, 0, 12)
+    payload += struct.pack(">HHH", 22, 1, 14)
+    fonts = strings.parse_finf(payload)
+    assert fonts == [
+        {"index": 0, "file": "#4", "style": 0, "size": 12},
+        {"index": 1, "file": "#22", "style": 1, "size": 14},
+    ]
+
+
+def test_to_mml_emits_interface_and_stringsets():
+    extracted = {
+        "interface": {
+            "color": [{"index": 0, "red": 1.0, "green": 0.0, "blue": 0.0}],
+            "rect": [{"index": 5, "top": 1, "left": 2, "bottom": 3, "right": 4}],
+            "font": [{"index": 0, "file": "#4", "style": 0, "size": 12}],
+        },
+        "STR#": {128: ["hello", "world"]},
+    }
+    mml = strings.to_mml(extracted)
+    assert "<interface>" in mml
+    assert "<color " in mml
+    assert "<rect " in mml
+    assert "<font " in mml
+    assert '<stringset index="128">' in mml
+    assert "<string index=\"0\">hello</string>" in mml
+
+
 @pytest.mark.needs_sample_data
 def test_m1_marathon_appl_strings_and_terminals(sample_dir: Path, tmp_path: Path):
     appl = sample_dir / "Marathon.appl"

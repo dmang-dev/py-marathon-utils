@@ -274,6 +274,160 @@ def extract(source_path: Path | str, dest_dir: Path | str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Writer — Anvil patch binary from a parsed dict
+# ---------------------------------------------------------------------------
+
+def write(patch: dict) -> bytes:
+    """Serialize a parsed patch dict back to Anvil binary form.
+
+    Round-trips with `parse()`: `parse(write(parse(blob))) == parse(blob)`.
+
+    Useful for programmatic mod authoring — load a base patch, modify the
+    color tables or bitmaps, and write it back out.
+    """
+    _shapes = _shapes_module()
+    out = bytearray()
+
+    for coll in patch["collections"]:
+        out += struct.pack(">II", coll["index"] & 0xFFFFFFFF, coll["bit_depth"])
+
+        if coll["definition"]:
+            out += b"cldf"
+            out += _encode_cldf(coll["definition"])
+
+        for ct in coll["color_tables"]:
+            out += b"ctab"
+            out += struct.pack(">i", ct["index"])
+            for c in ct["colors"]:
+                flags = 0x80 if c.get("self_luminescent") else 0
+                out += struct.pack(">BBHHH", flags, c["value"] & 0xFF,
+                                    (c["r"] & 0xFF) << 8 | (c["r"] & 0xFF),
+                                    (c["g"] & 0xFF) << 8 | (c["g"] & 0xFF),
+                                    (c["b"] & 0xFF) << 8 | (c["b"] & 0xFF))
+
+        for hs in coll["high_shapes"]:
+            shape = hs["shape"]
+            frames = hs["frame_indices"]
+            framect = max(0, shape.get("effective_views", 1)) * max(0, shape.get("frames_per_view", 0))
+            size = 88 + framect * 2 + 2
+            out += b"hlsh"
+            out += struct.pack(">ii", hs["index"], size)
+            out += _encode_high_shape(shape)
+            for fi in frames:
+                out += struct.pack(">h", fi)
+            out += b"\x00\x00"  # terminator
+
+        for ls in coll["low_shapes"]:
+            out += b"llsh"
+            out += struct.pack(">i", ls["index"])
+            out += _encode_low_shape(ls["low_shape"])
+
+        for bm_entry in coll["bitmaps"]:
+            bm = bm_entry["bitmap"]
+            payload = _encode_bitmap_payload(bm)
+            out += b"bmap"
+            out += struct.pack(">ii", bm_entry["index"], len(payload))
+            out += payload
+
+        out += b"endc"
+
+    return bytes(out)
+
+
+def _encode_cldf(hdr: dict) -> bytes:
+    """Encode a 544-byte cldf chunk payload from a parsed header dict."""
+    body = struct.pack(
+        ">hhHhh i hi hi hi h i",
+        hdr.get("version", 3),
+        hdr.get("type", 0),
+        hdr.get("flags", 0),
+        hdr.get("color_count", 0),
+        hdr.get("clut_count", 0),
+        hdr.get("color_table_offset", 0),
+        hdr.get("high_shape_count", 0),
+        hdr.get("high_shape_table_offset", 0),
+        hdr.get("low_shape_count", 0),
+        hdr.get("low_shape_table_offset", 0),
+        hdr.get("bitmap_count", 0),
+        hdr.get("bitmap_table_offset", 0),
+        hdr.get("pixels_to_world", 1),
+        hdr.get("collection_size", 0),
+    )
+    return body + b"\x00" * (544 - len(body))
+
+
+def _encode_high_shape(shape: dict) -> bytes:
+    """Encode the 88-byte high-level shape header."""
+    name = shape.get("name", "").encode("mac-roman", errors="replace")[:33]
+    return struct.pack(
+        ">hHB33s hhhh hh hhh hh",
+        shape.get("type", 0),
+        shape.get("flags", 0),
+        len(name),
+        name.ljust(33, b"\x00"),
+        shape.get("number_of_views", 1),
+        shape.get("frames_per_view", 0),
+        shape.get("ticks_per_frame", 0),
+        shape.get("key_frame", 0),
+        shape.get("transfer_mode", 0),
+        shape.get("transfer_mode_period", 0),
+        shape.get("first_frame_sound", -1),
+        shape.get("key_frame_sound", -1),
+        shape.get("last_frame_sound", -1),
+        shape.get("pixels_to_world", 1),
+        shape.get("loop_frame", 0),
+    ) + b"\x00" * 28  # 28 bytes padding
+
+
+def _encode_low_shape(ls: dict) -> bytes:
+    """Encode the 36-byte low-level shape (frame transform) record."""
+    flags = ls.get("flags", 0)
+    return struct.pack(
+        ">Hi hhhhh hhhh hh",
+        flags,
+        int(ls.get("min_light_intensity", 0.0) * 65536),
+        ls.get("bitmap_index", 0),
+        ls.get("origin_x", 0),
+        ls.get("origin_y", 0),
+        ls.get("key_x", 0),
+        ls.get("key_y", 0),
+        ls.get("world_left", 0),
+        ls.get("world_right", 0),
+        ls.get("world_top", 0),
+        ls.get("world_bottom", 0),
+        ls.get("world_x0", 0),
+        ls.get("world_y0", 0),
+    ) + b"\x00" * 8  # 8 bytes padding
+
+
+def _encode_bitmap_payload(bm) -> bytes:
+    """Encode bitmap header + pixel payload.
+
+    Our `shapes.Bitmap` stores already-decoded row-major indices, so we write
+    the simplest form: raw uncompressed row-major (bytes_per_row >= 0)
+    regardless of how it was originally compressed. This is the safest choice
+    for round-tripping when the original encoding details aren't tracked.
+    """
+    width = bm.width
+    height = bm.height
+    # Force row-major, raw layout
+    flags = bm.flags & ~0x8000  # clear column-order
+    bytes_per_row = width
+
+    # Address table: (height + 1) int32s, content irrelevant for raw
+    addrs = b"\x00" * (4 * (height + 1))
+    # Header: w, h, bpr, flags, depth(8), 16 B reserved, then addrs
+    header = struct.pack(">hhhHh", width, height, bytes_per_row, flags, 8)
+    header += b"\x00" * 16
+    pixels = bm.indices
+    # If the source was column-order, transpose to row-order
+    if bm.column_order:
+        pixels = bytes(bm.indices[x * height + y]
+                       for y in range(height) for x in range(width))
+    return header + addrs + pixels
+
+
+# ---------------------------------------------------------------------------
 # Apply a patch onto a parsed shapes result
 # ---------------------------------------------------------------------------
 

@@ -55,6 +55,9 @@ marathon-utils extract strings  Marathon.appl   out/Strings
 
 # Anvil shape patches (community mod packs)
 marathon-utils extract patches  some_pack.patch out/Patches
+
+# Terminal screens (M2/Infinity) — renders each terminal page as a PNG
+marathon-utils extract terminals Map.sceA out/Terminals
 ```
 
 Format auto-detection means you don't need to tell the CLI which Marathon
@@ -91,7 +94,8 @@ for lev in result['levels'][:3]:
 | `Sounds.sndz` / `Sounds.sndA` | `marathon_utils.sounds` | 16-bit WAV files | ✅ M1 (Mac rsrc) + M2/Infinity (snd2) |
 | `Shapes.shps` / `Shapes.shpA` | `marathon_utils.shapes` | per-collection palette + per-shape PNG | ✅ M1 (RLE) + M2/Infinity (sparse) |
 | `Standard.phyA` / `Physics.phys` | `marathon_utils.physics` | per-record JSON (monsters, weapons, projectiles, effects, player physics) | ✅ M1 (mons/effe/proj/phys/weap) + M2 + Infinity |
-| Anvil patches (community mod packs) | `marathon_utils.patches` | parsed override records + `apply()` overlay onto a shapes parse | ✅ |
+| Anvil patches (community mod packs) | `marathon_utils.patches` | parsed override records, `apply()` overlay, and `write()` round-trip | ✅ |
+| M2 / Infinity terminal screens | `marathon_utils.terminals` | per-page PNGs in the classic green-on-black look | ✅ |
 | `Marathon.appl` (resource fork) | `marathon_utils.strings` | STR / STR# / TEXT / M1 terminal scripts | ✅ |
 | any WAD | `marathon_utils.wad` | walk chunks programmatically | ✅ M1 v0 + M2 v2 + Infinity v4 |
 | MacBinary II | `marathon_utils.macbinary` | unwrap to data+rsrc forks | ✅ |
@@ -124,10 +128,11 @@ level as a PNG suitable for level-design review.
 
 These exist in the upstream Perl marathon-utils but aren't ported. PRs welcome:
 
-- Writing patches (`xml2patch.pl`) — we read + apply, but don't author new
-  patches yet
-- Resource → MML conversion (`rsrc2mml.pl`) — but `strings.to_mml()` covers the
-  string-set portion of this
+- Writing full shape files (`xml2shapes.pl`) — we round-trip patches, but
+  haven't written the M2 .shpA outer container yet
+- Marathon 1 terminal rendering — M1 terminals are stored as human-readable
+  scripts (see `strings` module) that would need a compiler step to feed
+  the renderer
 - Marathon 2 Preview Shapes (`prevshapes2xml.pl`) — historical/niche
 - 16-bit shape banks (M2/Infinity ships an 8-bit and 16-bit version of each
   collection; we render the 8-bit bank, which carries the canonical sprites)

@@ -6,6 +6,29 @@ All notable changes to py-marathon-utils. Format follows
 
 ## [Unreleased]
 
+### Added — Terminal renderer, writers, and resource MML
+
+- `terminals`: full port of `termxml2images.pl` (835 lines of Perl). Renders
+  Marathon 2 / Infinity terminal screens as PNG pages with the iconic
+  green-on-black classic look. Includes a bitmap font loader (parses the
+  Courier12/Bold/Italic .txt format), style-run extraction from M2's
+  `font_change` records, monospace greedy text wrapping, and the per-status
+  page-counter naming scheme (`<level>_s<term>[u|s|f]_p<page>.png`).
+  Verified rendering Durandal's iconic "Welcome back" opening from Marathon
+  2's level 0 with the word "Marathon" properly italicized.
+- `maps.parse_terminal`: now decodes the full `groupings` and `font_changes`
+  arrays (previously only counted them and emitted text). This is the input
+  format the new renderer consumes.
+- `patches.write`: round-trip writer for Anvil patches. Validated bit-perfect
+  on the real CTF Flag Shapes Patch from Simplici7y.
+- `strings`: extended to also parse `clut` (interface colors), `nrct`
+  (interface rectangles), and `finf` (font info) resources from
+  `Marathon.appl`. `to_mml()` now emits the corresponding `<interface>`
+  block plus `<color>/<rect>/<font>` override elements — full feature parity
+  with `rsrc2mml.pl`.
+- CLI: new `marathon-utils extract terminals <Map.sceA> <out>` subcommand.
+- 14 new tests (7 terminals + 3 writers + 4 strings).
+
 ### Added — M1 physics + Anvil patches
 
 - `physics`: M1 `Physics.phys` now fully decoded. M1 uses an older flat-chunk
