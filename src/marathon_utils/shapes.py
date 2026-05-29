@@ -430,60 +430,64 @@ def _extract_m1(coll_resources, dest_dir, clut_index, manifest) -> dict:
 def _extract_m2(blob: bytes, table: list, dest_dir: Path,
                 clut_index: int, manifest: dict) -> dict:
     """Extract an M2 / Infinity shapes file. The 32-entry table at the start
-    points to per-collection 8-bit and 16-bit data blocks; we render the 8-bit
-    bank since that's what carries the palette-indexed sprites we need.
+    points to per-collection 8-bit and 16-bit data banks. Both are rendered:
+    the 8-bit bank to `Coll_<NN>/` and (where present) the 16-bit bank to
+    `Coll_<NN>_16bit/`.
     """
+    banks = (("off8", "len8", ""), ("off16", "len16", "_16bit"))
     for coll_idx, entry in enumerate(table):
-        off, length = entry["off8"], entry["len8"]
-        if off <= 0 or length <= 0:
-            continue
-        if off + length > len(blob):
-            manifest["errors"].append({"collection": coll_idx,
-                                       "error": f"out-of-bounds slice {off}:{off + length}"})
-            continue
-        payload = blob[off:off + length]
+        for off_key, len_key, suffix in banks:
+            off, length = entry[off_key], entry[len_key]
+            if off <= 0 or length <= 0:
+                continue
+            if off + length > len(blob):
+                manifest["errors"].append({"collection": coll_idx,
+                                           "error": f"out-of-bounds slice {off}:{off + length}"})
+                continue
+            payload = blob[off:off + length]
 
-        coll_dir = dest_dir / f"Coll_{coll_idx:02d}"
-        coll_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            parsed = parse_collection(payload, format_version=2)
-        except Exception as e:
-            manifest["errors"].append({"collection": coll_idx, "error": str(e)})
-            continue
-
-        cluts = parsed["cluts"]
-        active_clut = cluts[min(clut_index, len(cluts) - 1)] if cluts else [(0, 0, 0)] * 256
-
-        _palette_swatch(active_clut).save(coll_dir / "palette.png")
-
-        bitmaps_dir = coll_dir / "bitmaps"
-        bitmaps_dir.mkdir(exist_ok=True)
-        for bi, bm in enumerate(parsed["bitmaps"]):
+            coll_dir = dest_dir / f"Coll_{coll_idx:02d}{suffix}"
+            coll_dir.mkdir(parents=True, exist_ok=True)
             try:
-                bm.to_image(active_clut).save(bitmaps_dir / f"{bi:03d}.png")
+                parsed = parse_collection(payload, format_version=2)
             except Exception as e:
-                manifest["errors"].append({
-                    "collection": coll_idx, "bitmap": bi, "error": str(e),
-                })
+                manifest["errors"].append({"collection": coll_idx, "error": str(e)})
+                continue
 
-        shapes_meta = {
-            "header": dict(parsed["header"]),
-            "high_shapes": parsed["high_shapes"],
-            "low_shapes": parsed["low_shapes"],
-            "clut_count": len(cluts),
-        }
-        (coll_dir / "shapes.json").write_text(json.dumps(shapes_meta, indent=2),
-                                              encoding="utf-8")
+            cluts = parsed["cluts"]
+            active_clut = cluts[min(clut_index, len(cluts) - 1)] if cluts else [(0, 0, 0)] * 256
 
-        manifest["collections"].append({
-            "index": coll_idx,
-            "status": entry["status"],
-            "flags": entry["flags"],
-            "bitmap_count": len(parsed["bitmaps"]),
-            "high_shape_count": len(parsed["high_shapes"]),
-            "low_shape_count": len(parsed["low_shapes"]),
-            "clut_count": len(cluts),
-        })
+            _palette_swatch(active_clut).save(coll_dir / "palette.png")
+
+            bitmaps_dir = coll_dir / "bitmaps"
+            bitmaps_dir.mkdir(exist_ok=True)
+            for bi, bm in enumerate(parsed["bitmaps"]):
+                try:
+                    bm.to_image(active_clut).save(bitmaps_dir / f"{bi:03d}.png")
+                except Exception as e:
+                    manifest["errors"].append({
+                        "collection": coll_idx, "bitmap": bi, "error": str(e),
+                    })
+
+            shapes_meta = {
+                "header": dict(parsed["header"]),
+                "high_shapes": parsed["high_shapes"],
+                "low_shapes": parsed["low_shapes"],
+                "clut_count": len(cluts),
+            }
+            (coll_dir / "shapes.json").write_text(json.dumps(shapes_meta, indent=2),
+                                                  encoding="utf-8")
+
+            manifest["collections"].append({
+                "index": coll_idx,
+                "bit_depth": 16 if suffix else 8,
+                "status": entry["status"],
+                "flags": entry["flags"],
+                "bitmap_count": len(parsed["bitmaps"]),
+                "high_shape_count": len(parsed["high_shapes"]),
+                "low_shape_count": len(parsed["low_shapes"]),
+                "clut_count": len(cluts),
+            })
 
     (dest_dir / "manifest.json").write_text(json.dumps(manifest, indent=2),
                                             encoding="utf-8")
@@ -494,32 +498,38 @@ def _extract_m2(blob: bytes, table: list, dest_dir: Path,
 # Parsing into in-memory dicts (no PNG output) — input for the writer below
 # ---------------------------------------------------------------------------
 
-def parse_m2_collections(blob: bytes) -> list[dict]:
+def parse_m2_collections(blob: bytes, *, include_16bit: bool = True) -> list[dict]:
     """Parse an M2 / Infinity Shapes file into per-collection dicts without
     rendering. Companion to `write_m2()` for round-tripping.
 
     Returns a list of `{index, status, flags, bit_depth, header, cluts,
-    bitmaps, high_shapes, low_shapes}` dicts. Empty slots in the outer
-    32-entry collection table are omitted.
+    bitmaps, high_shapes, low_shapes}` dicts. Each populated collection slot
+    yields one entry per bank present — the 8-bit bank (always) and, when
+    `include_16bit` is True, the 16-bit bank (only ~5 collections ship one).
+    For a given slot the 8-bit entry is emitted before the 16-bit entry.
+    Empty slots in the outer 32-entry table are omitted.
     """
     table = _read_m2_table(blob)
+    banks = (("off8", "len8", 8), ("off16", "len16", 16)) if include_16bit \
+        else (("off8", "len8", 8),)
     out: list[dict] = []
     for idx, entry in enumerate(table):
-        off, length = entry["off8"], entry["len8"]
-        if off <= 0 or length <= 0:
-            continue
-        payload = blob[off: off + length]
-        try:
-            parsed = parse_collection(payload, format_version=2)
-        except Exception:
-            continue
-        out.append({
-            "index": idx,
-            "status": entry["status"],
-            "flags": entry["flags"],
-            "bit_depth": 8,
-            **parsed,
-        })
+        for off_key, len_key, depth in banks:
+            off, length = entry[off_key], entry[len_key]
+            if off <= 0 or length <= 0:
+                continue
+            payload = blob[off: off + length]
+            try:
+                parsed = parse_collection(payload, format_version=2)
+            except Exception:
+                continue
+            out.append({
+                "index": idx,
+                "status": entry["status"],
+                "flags": entry["flags"],
+                "bit_depth": depth,
+                **parsed,
+            })
     return out
 
 
@@ -708,32 +718,54 @@ def encode_collection(coll: dict) -> bytes:
 def write_m2(collections: list[dict], *, max_coll: int = 31) -> bytes:
     """Write an M2 / Infinity Shapes file from parsed-collection dicts.
 
-    `collections` follows `parse_m2_collections()`'s structure. 16-bit slots
-    are left empty (we only round-trip 8-bit data). The outer table is sized
-    to fit `max(max_coll, max collection index)+1` entries.
+    `collections` follows `parse_m2_collections()`'s structure: zero or more
+    entries per collection index, each tagged `bit_depth` 8 or 16. Both banks
+    are written to their respective table slots (`off8/len8`, `off16/len16`).
+    Data blocks are laid out contiguously in slot order, 8-bit before 16-bit
+    within a slot — matching the original file's layout. The outer table is
+    sized to `max(max_coll, max index) + 1` entries.
     """
-    coll_by_idx = {c["index"]: c for c in collections}
-    real_max = max([max_coll] + [c["index"] for c in collections])
+    # Group entries by collection index and bank depth.
+    by_idx: dict[int, dict[int, dict]] = {}
+    for c in collections:
+        by_idx.setdefault(c["index"], {})[c.get("bit_depth", 8)] = c
+
+    real_max = max([max_coll, *by_idx])
     table_size = (real_max + 1) * 32
 
-    payloads: dict[int, bytes] = {
-        idx: encode_collection(coll_by_idx[idx]) for idx in coll_by_idx
-    }
+    # Encode each bank's payload up front.
+    payloads: dict[tuple[int, int], bytes] = {}
+    for idx, banks in by_idx.items():
+        for depth, coll in banks.items():
+            payloads[(idx, depth)] = encode_collection(coll)
+
+    # Assign file offsets in write order: slot 0..max, 8-bit then 16-bit.
+    offsets: dict[tuple[int, int], int] = {}
+    payload_order: list[tuple[int, int]] = []
+    cur = table_size
+    for idx in range(real_max + 1):
+        for depth in (8, 16):
+            if (idx, depth) in payloads:
+                offsets[(idx, depth)] = cur
+                cur += len(payloads[(idx, depth)])
+                payload_order.append((idx, depth))
 
     out = bytearray()
-    file_off = table_size
     for idx in range(real_max + 1):
-        coll = coll_by_idx.get(idx)
-        if coll is not None and payloads.get(idx):
-            status = coll.get("status", 0)
-            flags = coll.get("flags", 0)
-            off8 = file_off
-            len8 = len(payloads[idx])
-            file_off += len8
-            out += struct.pack(">hHii ii", status, flags, off8, len8, -1, 0)
-        else:
-            out += struct.pack(">hHii ii", 0, 0, -1, 0, -1, 0)
+        banks = by_idx.get(idx, {})
+        status = flags = 0
+        off8 = off16 = -1
+        len8 = len16 = 0
+        if banks:
+            any_coll = next(iter(banks.values()))
+            status = any_coll.get("status", 0)
+            flags = any_coll.get("flags", 0)
+            if (idx, 8) in payloads:
+                off8, len8 = offsets[(idx, 8)], len(payloads[(idx, 8)])
+            if (idx, 16) in payloads:
+                off16, len16 = offsets[(idx, 16)], len(payloads[(idx, 16)])
+        out += struct.pack(">hHii ii", status, flags, off8, len8, off16, len16)
         out += b"\x00" * 12
-    for idx in sorted(coll_by_idx):
-        out += payloads[idx]
+    for key in payload_order:
+        out += payloads[key]
     return bytes(out)

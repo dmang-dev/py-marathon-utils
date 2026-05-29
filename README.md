@@ -103,7 +103,7 @@ for lev in result['levels'][:3]:
 | Anvil patches (community mod packs) | `marathon_utils.patches` | parsed override records, `apply()` overlay, and `write()` round-trip | ✅ |
 | Terminal screens (all 3 games) | `marathon_utils.terminals` | per-page PNGs in the classic green-on-black look | ✅ M1 (compiled scripts) + M2 + Infinity |
 | `Marathon.appl` (resource fork) | `marathon_utils.strings` | STR / STR# / TEXT / M1 terminal scripts + `clut`/`nrct`/`finf` → MML | ✅ |
-| Shapes writer | `marathon_utils.shapes.write_m2` | round-trip parsed collections back to a binary `.shpA` | ✅ M2 / Infinity |
+| Shapes writer | `marathon_utils.shapes.write_m2` | round-trip parsed collections back to a binary `.shpA` (8-bit + 16-bit banks) | ✅ M2 / Infinity |
 | Marine player sprites | `marathon_utils.samsara` | composited torso+leg PNGs (Samsara Doom-mod helper) | ✅ M2 / Infinity |
 | any WAD | `marathon_utils.wad` | walk chunks programmatically | ✅ M1 v0 + M2 v2 + Infinity v4 |
 | MacBinary II | `marathon_utils.macbinary` | unwrap to data+rsrc forks | ✅ |
@@ -128,7 +128,9 @@ M1 terminal-script **compiler** (`terminals.compile_m1_script`).
   weapon/physics constants. They're preserved as raw bytes in the JSON for now.
 - **Shape files**: M1 stores collections as `.256` Mac resources with row/
   column int16-opcode RLE bitmaps; M2+ uses a flat 32-entry collection table
-  with column-major sparse `(first_row, last_row, pixels)` bitmaps.
+  with column-major sparse `(first_row, last_row, pixels)` bitmaps. Each M2+
+  table slot can hold an 8-bit bank and a 16-bit bank (~5 collections ship the
+  higher-color 16-bit art); both are read, rendered, and round-tripped.
 - **Sound files**: M1 uses classic Mac `snd ` resources; M2/Infinity use a
   custom `snd2` container with per-sound permutations. Both support stdSH
   (8-bit unsigned), extSH (multi-channel/16-bit), and cmpSH "twos" (signed
@@ -145,11 +147,10 @@ scope:
   (`betas/*.pl`). Marathon archaeology for snapshots almost nobody has.
 - **Marathon: Durandal XBLA assets** (`cma2wavs.pl`, `cmt2dds.pl`,
   `live2dir.pl`, `mark2dir.pl`) — a separate codebase for a separate game.
-- **16-bit shape banks** — M2/Infinity ships an 8-bit and a 16-bit version of
-  each collection; we read/write the 8-bit bank, which carries the canonical
-  sprites. The writer leaves the 16-bit slot empty.
 - **`Images.imgA`** (M2/Infinity chapter screens and title art) — separate
-  format, not part of the marathon-utils script set.
+  format (QuickDraw PICT v2 in a Mac resource fork), not part of the
+  marathon-utils script set. The resource fork parses via `macrsrc`, but
+  decoding the PICT pixel data would need a dedicated PICT v2 decoder.
 
 ## Format reference
 

@@ -6,6 +6,20 @@ All notable changes to py-marathon-utils. Format follows
 
 ## [Unreleased]
 
+### Added — 16-bit shape banks
+
+- `shapes.parse_m2_collections(include_16bit=True)`: each populated M2/Infinity
+  collection slot now yields its 16-bit bank in addition to the 8-bit bank
+  (tagged `bit_depth`). In M2 five collections ship a 16-bit bank (interface +
+  chapter/scenery art at 256-color depth); Infinity likewise. Pass
+  `include_16bit=False` for the previous 8-bit-only behavior.
+- `shapes.write_m2`: writes both banks back to their `off8/len8` and
+  `off16/len16` table slots, contiguous in slot order (8-bit before 16-bit) to
+  match the original layout. Round-trips pixel-perfect across all 1,341 (M2) /
+  1,565 (Infinity) bitmaps spanning both banks.
+- `shapes.extract`: renders the 16-bit bank to a `Coll_<NN>_16bit/` sibling
+  directory alongside the 8-bit `Coll_<NN>/`.
+
 ### Added — Shapes writer, M1 terminals, marine composer, terminal tooling
 
 - `shapes.write_m2` + `shapes.parse_m2_collections`: round-trip writer for
