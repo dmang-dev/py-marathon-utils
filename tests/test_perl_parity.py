@@ -46,13 +46,20 @@ def _have_perl_with_xml_writer() -> bool:
 
 
 def _find_map2xml() -> Path | None:
-    """Look for a vendored marathon-utils checkout next to this repo."""
-    repo = Path(__file__).resolve().parents[1]
-    candidates = [
-        repo / "vendor" / "marathon-utils" / "map2xml.pl",
-        # Convenience for local dev: the original project's vendored copy
-        Path.home() / "Desktop" / "m1ue5" / "M1UE5" / "Tools" / "marathon-utils" / "map2xml.pl",
-    ]
+    """Locate a local marathon-utils checkout for the cross-validation test.
+
+    The upstream Perl is not vendored in this repo (it's third-party and
+    unlicensed). Point `MARATHON_UTILS_DIR` at a local clone of
+    https://github.com/Hopper262/marathon-utils to enable the parity test;
+    otherwise it skips.
+    """
+    import os
+    env = os.environ.get("MARATHON_UTILS_DIR")
+    candidates = []
+    if env:
+        candidates.append(Path(env) / "map2xml.pl")
+    # A sibling clone, if present.
+    candidates.append(Path(__file__).resolve().parents[2] / "marathon-utils" / "map2xml.pl")
     for c in candidates:
         if c.is_file():
             return c

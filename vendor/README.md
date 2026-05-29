@@ -1,25 +1,23 @@
 # vendor/
 
-Third-party reference implementations kept in-tree for the parity test suite.
+Small redistributable dependency kept in-tree for the parity test suite.
 
-## `marathon-utils/`
+## marathon-utils (NOT vendored)
 
-Perl scripts by [Hopper262](https://github.com/Hopper262/marathon-utils).
-Vendored at the commit that was current when py-marathon-utils v0.1.0 shipped.
-We don't redistribute or modify these; they exist so `tests/test_perl_parity.py`
-can run `map2xml.pl` and diff its output against ours. See the upstream repo
-for license/attribution questions.
-
-To refresh:
+The cross-validation test (`tests/test_perl_parity.py`) compares our parser
+against [Hopper262/marathon-utils](https://github.com/Hopper262/marathon-utils).
+That upstream is **not** bundled here — it has no license, so we don't
+redistribute it. The test skips unless you provide a local clone:
 
 ```bash
-rm -rf vendor/marathon-utils
-git clone --depth=1 https://github.com/Hopper262/marathon-utils vendor/marathon-utils
-rm -rf vendor/marathon-utils/.git
+git clone --depth=1 https://github.com/Hopper262/marathon-utils
+export MARATHON_UTILS_DIR=$PWD/marathon-utils   # or place it beside this repo
+pytest tests/test_perl_parity.py
 ```
 
 ## `perl-lib/`
 
-Pure-Perl `XML::Writer` module needed by the marathon-utils scripts. We vendor
-it so the parity test runs without CPAN setup. Source:
+Pure-Perl `XML::Writer` module needed by the marathon-utils scripts during the
+parity test. Freely redistributable under the same terms as Perl itself
+(Artistic / GPL). Source:
 [CPAN XML-Writer-0.900](https://metacpan.org/release/JOSEPHW/XML-Writer-0.900).

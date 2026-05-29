@@ -36,7 +36,6 @@ def _m1_root() -> Path | None:
         "MARATHON_SAMPLE_DATA",
         [
             Path.home() / "Desktop" / "m1ue5" / "M1SOURCE" / "Marathon-20250829",
-            Path("C:/Users/Dustin Kost/Desktop/m1ue5/M1SOURCE/Marathon-20250829"),
         ],
         "Map.scen",
     )
@@ -47,7 +46,6 @@ def _m2_root() -> Path | None:
         "MARATHON2_SAMPLE_DATA",
         [
             Path.home() / "Desktop" / "m1ue5" / "M2SOURCE" / "Marathon2-20250829",
-            Path("C:/Users/Dustin Kost/Desktop/m1ue5/M2SOURCE/Marathon2-20250829"),
         ],
         "Map.sceA",
     )
@@ -58,7 +56,6 @@ def _mi_root() -> Path | None:
         "MARATHON_INFINITY_SAMPLE_DATA",
         [
             Path.home() / "Desktop" / "m1ue5" / "MISOURCE" / "MarathonInfinity-20250829",
-            Path("C:/Users/Dustin Kost/Desktop/m1ue5/MISOURCE/MarathonInfinity-20250829"),
         ],
         "Map.sceA",
     )
