@@ -34,6 +34,7 @@ from . import macbinary, macrsrc, maps, patches, physics, sounds, strings, wad
 
 __all__ = [
            "__version__",
+           "images",
            "macbinary",
            "macrsrc",
            "maps",
@@ -47,6 +48,6 @@ __all__ = [
            "visualize",
            "wad",
 ]
-# Note: `shapes`, `terminals`, `samsara`, and `visualize` need Pillow — they're
-# not imported here so the package can load with stdlib only. Import them
-# explicitly: `from marathon_utils import terminals`.
+# Note: `shapes`, `terminals`, `samsara`, `images`, and `visualize` need Pillow
+# — they're not imported here so the package can load with stdlib only. Import
+# them explicitly: `from marathon_utils import terminals`.

@@ -64,6 +64,9 @@ marathon-utils extract terminals Marathon.appl out/Terminals_M1
 # Marine player sprites (Samsara Doom-mod helper) — composited torso+leg PNGs
 marathon-utils marines Shapes.shpA out/Marines              # one per view
 marathon-utils marines Shapes.shpA out/Marines --full-animation   # ~23k frames
+
+# Chapter screens / title art (M2/Infinity Images.imgA) — decodes PICTs to PNG
+marathon-utils extract images Images.imgA out/Images
 ```
 
 Format auto-detection means you don't need to tell the CLI which Marathon
@@ -105,6 +108,7 @@ for lev in result['levels'][:3]:
 | `Marathon.appl` (resource fork) | `marathon_utils.strings` | STR / STR# / TEXT / M1 terminal scripts + `clut`/`nrct`/`finf` → MML | ✅ |
 | Shapes writer | `marathon_utils.shapes.write_m2` | round-trip parsed collections back to a binary `.shpA` (8-bit + 16-bit banks) | ✅ M2 / Infinity |
 | Marine player sprites | `marathon_utils.samsara` | composited torso+leg PNGs (Samsara Doom-mod helper) | ✅ M2 / Infinity |
+| `Images.imgA` chapter art | `marathon_utils.images` | title/chapter screens → PNG (QuickDraw PICT v2 decoder) | ✅ M2 / Infinity |
 | any WAD | `marathon_utils.wad` | walk chunks programmatically | ✅ M1 v0 + M2 v2 + Infinity v4 |
 | MacBinary II | `marathon_utils.macbinary` | unwrap to data+rsrc forks | ✅ |
 | Mac OS resource fork | `marathon_utils.macrsrc` | typed `{resource_type: [{id, name, data}, ...]}` | ✅ |
@@ -147,10 +151,6 @@ scope:
   (`betas/*.pl`). Marathon archaeology for snapshots almost nobody has.
 - **Marathon: Durandal XBLA assets** (`cma2wavs.pl`, `cmt2dds.pl`,
   `live2dir.pl`, `mark2dir.pl`) — a separate codebase for a separate game.
-- **`Images.imgA`** (M2/Infinity chapter screens and title art) — separate
-  format (QuickDraw PICT v2 in a Mac resource fork), not part of the
-  marathon-utils script set. The resource fork parses via `macrsrc`, but
-  decoding the PICT pixel data would need a dedicated PICT v2 decoder.
 
 ## Format reference
 

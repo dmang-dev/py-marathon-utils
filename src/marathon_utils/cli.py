@@ -8,6 +8,7 @@ Usage:
     marathon-utils extract strings   <Marathon.appl><out-dir>
     marathon-utils extract patches   <pack.patch>   <out-dir>
     marathon-utils extract terminals <Map.sceA|Marathon.appl> <out-dir>
+    marathon-utils extract images    <Images.imgA>  <out-dir>
     marathon-utils visualize         <Map.scen>     <out-dir>
     marathon-utils marines           <Shapes.shpA>  <out-dir>
 
@@ -37,6 +38,13 @@ def _cmd_extract(args: argparse.Namespace) -> int:
         from . import physics as mod
     elif kind == "strings":
         from . import strings as mod
+    elif kind == "images":
+        try:
+            from . import images as mod
+        except ImportError as e:  # pragma: no cover
+            print(f"ERROR: image decoder needs Pillow installed: {e}", file=sys.stderr)
+            print("  pip install py-marathon-utils[images]", file=sys.stderr)
+            return 3
     elif kind == "patches":
         try:
             from . import patches as mod
@@ -111,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ex = sub.add_parser("extract", help="extract one of the Marathon data files")
     ex.add_argument("kind", choices=["maps", "sounds", "shapes", "physics",
-                                      "strings", "patches", "terminals"],
+                                      "strings", "patches", "terminals", "images"],
                     help="which file type to extract")
     ex.add_argument("source", help="path to the input file (e.g. Map.scen)")
     ex.add_argument("dest", help="output directory")

@@ -6,6 +6,20 @@ All notable changes to py-marathon-utils. Format follows
 
 ## [Unreleased]
 
+### Added — Images.imgA chapter art (QuickDraw PICT v2 decoder)
+
+- `images`: new module decodes the M2/Infinity `Images.imgA` chapter screens
+  and title art to PNG. Not part of upstream marathon-utils (Hopper handles
+  PICTs in a separate `classic-mac-utils` repo) — this is a from-scratch
+  QuickDraw PICT v2 decoder. Handles the opcodes Marathon uses:
+  `PackBitsRect` (8-bit indexed + embedded ColorTable), and `DirectBitsRect`
+  in both 16-bit RGB555 (packType 3, PackBits on 16-bit units) and 32-bit
+  planar RGB (packType 4, cmpCount 3). Includes a reusable PackBits codec.
+  Decodes all 14 M2 + 17 Infinity PICTs with zero errors (verified against
+  the Marathon 2: Durandal title screen across all three pixel formats).
+- CLI: new `marathon-utils extract images <Images.imgA> <out>` subcommand.
+- 6 new tests (PackBits codec units + full M2/MI decode).
+
 ### Added — 16-bit shape banks
 
 - `shapes.parse_m2_collections(include_16bit=True)`: each populated M2/Infinity
