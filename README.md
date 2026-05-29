@@ -56,8 +56,14 @@ marathon-utils extract strings  Marathon.appl   out/Strings
 # Anvil shape patches (community mod packs)
 marathon-utils extract patches  some_pack.patch out/Patches
 
-# Terminal screens (M2/Infinity) — renders each terminal page as a PNG
-marathon-utils extract terminals Map.sceA out/Terminals
+# Terminal screens — renders each terminal page as a PNG.
+# Auto-detects M1 (compiles Marathon.appl scripts) vs M2/Infinity (map chunks).
+marathon-utils extract terminals Map.sceA      out/Terminals
+marathon-utils extract terminals Marathon.appl out/Terminals_M1
+
+# Marine player sprites (Samsara Doom-mod helper) — composited torso+leg PNGs
+marathon-utils marines Shapes.shpA out/Marines              # one per view
+marathon-utils marines Shapes.shpA out/Marines --full-animation   # ~23k frames
 ```
 
 Format auto-detection means you don't need to tell the CLI which Marathon
@@ -95,14 +101,18 @@ for lev in result['levels'][:3]:
 | `Shapes.shps` / `Shapes.shpA` | `marathon_utils.shapes` | per-collection palette + per-shape PNG | ✅ M1 (RLE) + M2/Infinity (sparse) |
 | `Standard.phyA` / `Physics.phys` | `marathon_utils.physics` | per-record JSON (monsters, weapons, projectiles, effects, player physics) | ✅ M1 (mons/effe/proj/phys/weap) + M2 + Infinity |
 | Anvil patches (community mod packs) | `marathon_utils.patches` | parsed override records, `apply()` overlay, and `write()` round-trip | ✅ |
-| M2 / Infinity terminal screens | `marathon_utils.terminals` | per-page PNGs in the classic green-on-black look | ✅ |
-| `Marathon.appl` (resource fork) | `marathon_utils.strings` | STR / STR# / TEXT / M1 terminal scripts | ✅ |
+| Terminal screens (all 3 games) | `marathon_utils.terminals` | per-page PNGs in the classic green-on-black look | ✅ M1 (compiled scripts) + M2 + Infinity |
+| `Marathon.appl` (resource fork) | `marathon_utils.strings` | STR / STR# / TEXT / M1 terminal scripts + `clut`/`nrct`/`finf` → MML | ✅ |
+| Shapes writer | `marathon_utils.shapes.write_m2` | round-trip parsed collections back to a binary `.shpA` | ✅ M2 / Infinity |
+| Marine player sprites | `marathon_utils.samsara` | composited torso+leg PNGs (Samsara Doom-mod helper) | ✅ M2 / Infinity |
 | any WAD | `marathon_utils.wad` | walk chunks programmatically | ✅ M1 v0 + M2 v2 + Infinity v4 |
 | MacBinary II | `marathon_utils.macbinary` | unwrap to data+rsrc forks | ✅ |
 | Mac OS resource fork | `marathon_utils.macrsrc` | typed `{resource_type: [{id, name, data}, ...]}` | ✅ |
 
 Plus a top-down map visualizer (`marathon_utils.visualize`) that renders each
-level as a PNG suitable for level-design review.
+level as a PNG, a terminal **location** finder and **HTML preview** generator
+(`terminals.terminal_locations` / `terminals.generate_html_preview`), and an
+M1 terminal-script **compiler** (`terminals.compile_m1_script`).
 
 ### Version-specific notes
 
@@ -124,22 +134,22 @@ level as a PNG suitable for level-design review.
   (8-bit unsigned), extSH (multi-channel/16-bit), and cmpSH "twos" (signed
   8-bit) headers.
 
-## What it doesn't do (yet)
+## What it doesn't do
 
-These exist in the upstream Perl marathon-utils but aren't ported. PRs welcome:
+The full marathon-utils "wishlist" (everything that touches M1/M2/Infinity +
+Aleph One) is ported. The remaining upstream scripts are deliberately out of
+scope:
 
-- Writing full shape files (`xml2shapes.pl`) — we round-trip patches, but
-  haven't written the M2 .shpA outer container yet
-- Marathon 1 terminal rendering — M1 terminals are stored as human-readable
-  scripts (see `strings` module) that would need a compiler step to feed
-  the renderer
-- Marathon 2 Preview Shapes (`prevshapes2xml.pl`) — historical/niche
-- 16-bit shape banks (M2/Infinity ships an 8-bit and 16-bit version of each
-  collection; we render the 8-bit bank, which carries the canonical sprites)
-- `Images.imgA` (M2/Infinity chapter screens and title art) — separate format
-- The Marathon: Durandal XBLA assets (`cma2wavs.pl`, `cmt2dds.pl`, `live2dir.pl`,
-  `mark2dir.pl`) — separate codebase, separate game
-- Reverse direction (write back to binary) — read-only for v0.1
+- **Historical prerelease formats** — Marathon 2 Preview Shapes
+  (`prevshapes2xml.pl`) and the M1 Alpha/January/May/June beta shape variants
+  (`betas/*.pl`). Marathon archaeology for snapshots almost nobody has.
+- **Marathon: Durandal XBLA assets** (`cma2wavs.pl`, `cmt2dds.pl`,
+  `live2dir.pl`, `mark2dir.pl`) — a separate codebase for a separate game.
+- **16-bit shape banks** — M2/Infinity ships an 8-bit and a 16-bit version of
+  each collection; we read/write the 8-bit bank, which carries the canonical
+  sprites. The writer leaves the 16-bit slot empty.
+- **`Images.imgA`** (M2/Infinity chapter screens and title art) — separate
+  format, not part of the marathon-utils script set.
 
 ## Format reference
 

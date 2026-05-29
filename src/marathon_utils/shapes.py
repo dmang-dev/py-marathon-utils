@@ -488,3 +488,252 @@ def _extract_m2(blob: bytes, table: list, dest_dir: Path,
     (dest_dir / "manifest.json").write_text(json.dumps(manifest, indent=2),
                                             encoding="utf-8")
     return manifest
+
+
+# ---------------------------------------------------------------------------
+# Parsing into in-memory dicts (no PNG output) — input for the writer below
+# ---------------------------------------------------------------------------
+
+def parse_m2_collections(blob: bytes) -> list[dict]:
+    """Parse an M2 / Infinity Shapes file into per-collection dicts without
+    rendering. Companion to `write_m2()` for round-tripping.
+
+    Returns a list of `{index, status, flags, bit_depth, header, cluts,
+    bitmaps, high_shapes, low_shapes}` dicts. Empty slots in the outer
+    32-entry collection table are omitted.
+    """
+    table = _read_m2_table(blob)
+    out: list[dict] = []
+    for idx, entry in enumerate(table):
+        off, length = entry["off8"], entry["len8"]
+        if off <= 0 or length <= 0:
+            continue
+        payload = blob[off: off + length]
+        try:
+            parsed = parse_collection(payload, format_version=2)
+        except Exception:
+            continue
+        out.append({
+            "index": idx,
+            "status": entry["status"],
+            "flags": entry["flags"],
+            "bit_depth": 8,
+            **parsed,
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Writer: shapes_collections -> binary M2 .shpA blob (port of xml2shapes.pl)
+# ---------------------------------------------------------------------------
+
+def _encode_bitmap_payload_raw(bm: Bitmap) -> bytes:
+    width = bm.width
+    height = bm.height
+    flags = bm.flags & ~0x8000
+    bytes_per_row = width
+    header = struct.pack(">hhhHh", width, height, bytes_per_row, flags, 8)
+    header += b"\x00" * 16
+    addr_table = b"\x00" * (4 * (height + 1))
+    if bm.column_order:
+        pixels = bytes(bm.indices[x * height + y]
+                       for y in range(height) for x in range(width))
+    else:
+        pixels = bytes(bm.indices)
+    payload = header + addr_table + pixels
+    pad = (-len(payload)) % 4
+    return payload + b"\x00" * pad
+
+
+def _encode_high_shape_record(shape: dict, frames: list[int]) -> bytes:
+    name = shape.get("name", "").encode("mac-roman", errors="replace")[:33]
+    header = struct.pack(
+        ">hHB33s hhhh hh hhh hh",
+        shape.get("type", 0),
+        shape.get("flags", 0),
+        len(name),
+        name.ljust(33, b"\x00"),
+        shape.get("number_of_views", 1),
+        shape.get("frames_per_view", 0),
+        shape.get("ticks_per_frame", 0),
+        shape.get("key_frame", 0),
+        shape.get("transfer_mode", 0),
+        shape.get("transfer_mode_period", 0),
+        shape.get("first_frame_sound", -1),
+        shape.get("key_frame_sound", -1),
+        shape.get("last_frame_sound", -1),
+        shape.get("pixels_to_world", 1),
+        shape.get("loop_frame", 0),
+    ) + b"\x00" * 28
+    frames_bytes = b"".join(struct.pack(">h", fi) for fi in frames)
+    # 2-byte terminator after frames (per HandleHlsh in xml2shapes.pl)
+    return header + frames_bytes + b"\x00\x00"
+
+
+def _encode_low_shape_record(ls: dict) -> bytes:
+    return struct.pack(
+        ">Hi hhhhh hhhh hh",
+        ls.get("flags", 0),
+        int(ls.get("min_light_intensity", 0.0) * 65536),
+        ls.get("bitmap_index", 0),
+        ls.get("origin_x", 0),
+        ls.get("origin_y", 0),
+        ls.get("key_x", 0),
+        ls.get("key_y", 0),
+        ls.get("world_left", 0),
+        ls.get("world_right", 0),
+        ls.get("world_top", 0),
+        ls.get("world_bottom", 0),
+        ls.get("world_x0", 0),
+        ls.get("world_y0", 0),
+    ) + b"\x00" * 8
+
+
+def _encode_clut(palette: list[tuple[int, int, int]], color_count: int) -> bytes:
+    out = bytearray()
+    for slot in range(color_count):
+        r, g, b = palette[slot] if slot < len(palette) else (0, 0, 0)
+        out += struct.pack(">BBHHH", 0, slot,
+                            (r << 8) | r, (g << 8) | g, (b << 8) | b)
+    return bytes(out)
+
+
+def _encode_cldf_header(hdr: dict, ctab_off: int, color_count: int, clut_count: int,
+                        hcount: int, hoff: int, lcount: int, loff: int,
+                        bcount: int, boff: int, total_size: int) -> bytes:
+    return struct.pack(
+        ">hhH hh i hi hi hi h i",
+        hdr.get("version", 3),
+        hdr.get("type", 0),
+        0,
+        color_count, clut_count, ctab_off,
+        hcount, hoff,
+        lcount, loff,
+        bcount, boff,
+        hdr.get("pixels_to_world", 1),
+        total_size,
+    ) + b"\x00" * 506
+
+
+def encode_collection(coll: dict) -> bytes:
+    """Encode one parsed collection back to .shpA payload bytes.
+
+    Layout per the M2 format (matches the reader in `parse_collection`)::
+
+        [544 B cldf header — points to ctab/hlsh/llsh/bmap section starts]
+        [color_count * clut_count * 8 B ctab data]
+        [hlsh offset table (count * 4 B int32, each relative to collection start)]
+        [hlsh record data — each (88 + 2*frames + 2) bytes]
+        [llsh offset table (count * 4 B int32)]
+        [llsh record data — each 36 B]
+        [bmap offset table (count * 4 B int32)]
+        [bmap record data — each padded to 4-byte boundary]
+    """
+    hdr = coll["header"]
+    cluts = coll.get("cluts") or []
+    high_shapes = coll.get("high_shapes") or []
+    low_shapes = coll.get("low_shapes") or []
+    bitmaps = coll.get("bitmaps") or []
+
+    color_count = hdr.get("color_count", 256)
+    clut_count = max(len(cluts), 1) if cluts else hdr.get("clut_count", 1)
+
+    # Encode CLUTs — no offset table
+    ctab_bytes = b"".join(_encode_clut(p, color_count) for p in cluts)
+
+    # Encode each variable-size record as bytes; we'll build the offset table next
+    hlsh_records = [
+        _encode_high_shape_record(hs, hs.get("low_shape_indices") or [])
+        if hs is not None else b""
+        for hs in high_shapes
+    ]
+    llsh_records = [
+        _encode_low_shape_record(ls) if ls is not None else b"\x00" * 36
+        for ls in low_shapes
+    ]
+    bmap_records = [
+        _encode_bitmap_payload_raw(bm) if bm is not None else b""
+        for bm in bitmaps
+    ]
+
+    # Layout: header at 0, ctab data, then three (offset table + data) sections
+    ctab_off = 544
+    hlsh_table_off = ctab_off + len(ctab_bytes)
+    hlsh_data_off = hlsh_table_off + 4 * len(hlsh_records)
+    cur = hlsh_data_off
+    hlsh_offsets = []
+    for rec in hlsh_records:
+        hlsh_offsets.append(cur)
+        cur += len(rec)
+    hlsh_data_size = cur - hlsh_data_off
+
+    llsh_table_off = hlsh_data_off + hlsh_data_size
+    llsh_data_off = llsh_table_off + 4 * len(llsh_records)
+    cur = llsh_data_off
+    llsh_offsets = []
+    for rec in llsh_records:
+        llsh_offsets.append(cur)
+        cur += len(rec)
+    llsh_data_size = cur - llsh_data_off
+
+    bmap_table_off = llsh_data_off + llsh_data_size
+    bmap_data_off = bmap_table_off + 4 * len(bmap_records)
+    cur = bmap_data_off
+    bmap_offsets = []
+    for rec in bmap_records:
+        bmap_offsets.append(cur)
+        cur += len(rec)
+    bmap_data_size = cur - bmap_data_off
+
+    total_size = bmap_data_off + bmap_data_size
+
+    hdr_bytes = _encode_cldf_header(
+        hdr, ctab_off, color_count, clut_count,
+        len(high_shapes), hlsh_table_off,
+        len(low_shapes), llsh_table_off,
+        len(bitmaps), bmap_table_off,
+        total_size,
+    )
+
+    parts = [hdr_bytes, ctab_bytes]
+    parts.append(b"".join(struct.pack(">i", o) for o in hlsh_offsets))
+    parts.extend(hlsh_records)
+    parts.append(b"".join(struct.pack(">i", o) for o in llsh_offsets))
+    parts.extend(llsh_records)
+    parts.append(b"".join(struct.pack(">i", o) for o in bmap_offsets))
+    parts.extend(bmap_records)
+    return b"".join(parts)
+
+
+def write_m2(collections: list[dict], *, max_coll: int = 31) -> bytes:
+    """Write an M2 / Infinity Shapes file from parsed-collection dicts.
+
+    `collections` follows `parse_m2_collections()`'s structure. 16-bit slots
+    are left empty (we only round-trip 8-bit data). The outer table is sized
+    to fit `max(max_coll, max collection index)+1` entries.
+    """
+    coll_by_idx = {c["index"]: c for c in collections}
+    real_max = max([max_coll] + [c["index"] for c in collections])
+    table_size = (real_max + 1) * 32
+
+    payloads: dict[int, bytes] = {
+        idx: encode_collection(coll_by_idx[idx]) for idx in coll_by_idx
+    }
+
+    out = bytearray()
+    file_off = table_size
+    for idx in range(real_max + 1):
+        coll = coll_by_idx.get(idx)
+        if coll is not None and payloads.get(idx):
+            status = coll.get("status", 0)
+            flags = coll.get("flags", 0)
+            off8 = file_off
+            len8 = len(payloads[idx])
+            file_off += len8
+            out += struct.pack(">hHii ii", status, flags, off8, len8, -1, 0)
+        else:
+            out += struct.pack(">hHii ii", 0, 0, -1, 0, -1, 0)
+        out += b"\x00" * 12
+    for idx in sorted(coll_by_idx):
+        out += payloads[idx]
+    return bytes(out)

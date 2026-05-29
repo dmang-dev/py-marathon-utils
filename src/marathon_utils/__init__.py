@@ -39,6 +39,7 @@ __all__ = [
            "maps",
            "patches",
            "physics",
+           "samsara",
            "shapes",
            "sounds",
            "strings",
@@ -46,6 +47,6 @@ __all__ = [
            "visualize",
            "wad",
 ]
-# Note: `shapes`, `terminals`, and `visualize` need Pillow — they're not
-# imported here so the package can load with stdlib only. Import them
+# Note: `shapes`, `terminals`, `samsara`, and `visualize` need Pillow — they're
+# not imported here so the package can load with stdlib only. Import them
 # explicitly: `from marathon_utils import terminals`.

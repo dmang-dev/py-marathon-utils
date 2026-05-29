@@ -24,6 +24,7 @@ scaled at the end).
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -583,24 +584,450 @@ def render_terminal(terminal: dict, *, fonts: list[BitmapFont],
 
 
 # ---------------------------------------------------------------------------
+# M1 terminal script compiler
+#
+# M1 stores terminals as human-readable scripts inside Marathon.appl's `term`
+# resources, e.g.:
+#
+#     ;L000.WELCOME.ENTRY
+#     #logon
+#     Airlock 34-a Terminal Access <Port 19.1.2.128>
+#     ;
+#     #information
+#     <Message to All Marathon Terminals>
+#     $BMarathon Emergency Systems Broadcast$b
+#     ...
+#     ;L000.WELCOME.SUCCESS
+#     #information
+#     ...
+#
+# We compile that into the same {groupings, font_changes, text} structure
+# the M2/Infinity binary terminal format produces, so the same renderer
+# can draw it.
+# ---------------------------------------------------------------------------
+
+_M1_DIRECTIVE_TO_GROUP = {
+    "logon": "logon",
+    "information": "information",
+    "checkpoint": "checkpoint",
+    "pict": "pict",
+    "logoff": "logoff",
+    "interlevel_teleport": "interlevel_teleport",
+    "intralevel_teleport": "intralevel_teleport",
+    "end": "end",
+    "tag": "tag",
+    "camera": "camera",
+    "static": "static",
+    "sound": "sound",
+    "movie": "movie",
+    "track": "track",
+}
+
+# Inline style commands per the Marathon engine convention
+_INLINE_CMD = re.compile(r"\$([BIUbiuC])(\d?)")
+
+_FACE_BOLD = 0x1
+_FACE_ITALIC = 0x2
+_FACE_UNDERLINE = 0x4
+
+
+def _tokenize_m1_text(text: str) -> tuple[str, list[dict]]:
+    """Parse inline `$B/$I/$U/$Cn` commands into a (plain_text, font_changes)
+    pair. font_changes contains entries with `change_index` (byte offset into
+    the plain text, MacRoman-encoded), `face`, `color`.
+    """
+    plain = []
+    changes: list[dict] = []
+    current_face = 0
+    current_color = 0
+    pos = 0
+
+    def _emit_change(byte_offset: int):
+        # Skip duplicate consecutive changes
+        if changes and changes[-1]["change_index"] == byte_offset:
+            changes[-1]["face"] = current_face
+            changes[-1]["color"] = current_color
+        else:
+            changes.append({
+                "change_index": byte_offset,
+                "face": current_face,
+                "color": current_color,
+                "font_index": current_face & 0x3,
+                "bold": bool(current_face & _FACE_BOLD),
+                "italic": bool(current_face & _FACE_ITALIC),
+                "underline": bool(current_face & _FACE_UNDERLINE),
+            })
+
+    for m in _INLINE_CMD.finditer(text):
+        # Append text up to this command
+        plain.append(text[pos:m.start()])
+        cmd = m.group(1)
+        arg = m.group(2)
+        # Compute current byte offset in the rendered plain string
+        flat = "".join(plain)
+        byte_offset = len(flat.encode("mac-roman", errors="replace"))
+        if cmd == "B":
+            current_face |= _FACE_BOLD
+        elif cmd == "b":
+            current_face &= ~_FACE_BOLD
+        elif cmd == "I":
+            current_face |= _FACE_ITALIC
+        elif cmd == "i":
+            current_face &= ~_FACE_ITALIC
+        elif cmd == "U":
+            current_face |= _FACE_UNDERLINE
+        elif cmd == "u":
+            current_face &= ~_FACE_UNDERLINE
+        elif cmd == "C" and arg.isdigit():
+            current_color = int(arg)
+        _emit_change(byte_offset)
+        pos = m.end()
+    plain.append(text[pos:])
+    return "".join(plain), changes
+
+
+def compile_m1_script(script: str) -> dict:
+    """Compile an M1 script-format terminal into the M2-style structure that
+    `render_terminal()` expects.
+
+    Returns a dict with `flags`, `lines_per_page`, `groupings`, `font_changes`,
+    `text` — same shape as `maps.parse_terminal` output.
+    """
+    # Normalize line endings (M1 uses classic Mac \r; strings module already
+    # normalizes when loading from the appl resource fork, but be defensive)
+    lines = script.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+    # Status modifier mapping from section name suffix
+    status_for_suffix = {"SUCCESS": "success", "FAILURE": "failure",
+                          "UNFINISHED": "unfinished"}
+
+    groupings: list[dict] = []
+    font_changes: list[dict] = []
+    text_parts: list[str] = []
+    current_status: str | None = None
+    pending_directive: tuple[str, int] | None = None
+    pending_text: list[str] = []
+
+    def flush_pending(text_start: int) -> int:
+        """Emit the buffered pending directive + its text, return new text length."""
+        if pending_directive is None:
+            return text_start
+        directive, permutation = pending_directive
+        group_type_name = _M1_DIRECTIVE_TO_GROUP.get(directive, "information")
+        body = "\n".join(pending_text).strip("\n")
+        # Convert \n back to \r for the Marathon engine convention
+        body_rendered, body_changes = _tokenize_m1_text(body.replace("\n", "\r"))
+        body_bytes = body_rendered.encode("mac-roman", errors="replace")
+
+        # Shift the body's font_changes to whole-terminal byte offsets
+        for fc in body_changes:
+            font_changes.append({**fc, "change_index": text_start + fc["change_index"]})
+
+        groupings.append({
+            "flags": 0,
+            "type": _group_type_index(group_type_name),
+            "type_name": group_type_name,
+            "permutation": permutation,
+            "start_index": text_start,
+            "length": len(body_bytes),
+            "max_lines": 0,
+        })
+        text_parts.append(body_rendered)
+        return text_start + len(body_bytes)
+
+    text_offset = 0
+    for raw_line in lines:
+        line = raw_line.rstrip("\r")
+
+        if line.startswith(";L"):
+            # Section marker: ;L<NNN>.<name>.<status>
+            # Flush any pending directive that was being built
+            text_offset = flush_pending(text_offset)
+            pending_directive = None
+            pending_text = []
+            parts = line[1:].split(".")
+            suffix = parts[-1].upper() if parts else ""
+            new_status = status_for_suffix.get(suffix)
+            if new_status and new_status != current_status:
+                # Emit a status-modifier grouping with empty text
+                groupings.append({
+                    "flags": 0,
+                    "type": _group_type_index(new_status),
+                    "type_name": new_status,
+                    "permutation": 0,
+                    "start_index": text_offset,
+                    "length": 0,
+                    "max_lines": 0,
+                })
+                current_status = new_status
+            elif suffix == "ENTRY" or not new_status:
+                # Entry / default — emit `end` to clear any prior status
+                if current_status is not None:
+                    groupings.append({
+                        "flags": 0,
+                        "type": _group_type_index("end"),
+                        "type_name": "end",
+                        "permutation": 0,
+                        "start_index": text_offset,
+                        "length": 0,
+                        "max_lines": 0,
+                    })
+                    current_status = None
+            continue
+
+        if line == ";":
+            # In-section separator — flush current directive's body
+            text_offset = flush_pending(text_offset)
+            pending_directive = None
+            pending_text = []
+            continue
+
+        if line.startswith("#"):
+            # New directive — flush previous, start new
+            text_offset = flush_pending(text_offset)
+            cmd_parts = line[1:].split(None, 1)
+            cmd = cmd_parts[0] if cmd_parts else ""
+            perm = 0
+            if len(cmd_parts) > 1:
+                try:
+                    perm = int(cmd_parts[1].strip())
+                except ValueError:
+                    perm = 0
+            pending_directive = (cmd, perm)
+            pending_text = []
+            continue
+
+        if pending_directive is not None:
+            pending_text.append(raw_line)
+
+    # Flush trailing pending content
+    text_offset = flush_pending(text_offset)
+
+    return {
+        "flags": 0,
+        "lines_per_page": 23,
+        "groupings": groupings,
+        "font_changes": font_changes,
+        "text": "".join(text_parts),
+    }
+
+
+def _group_type_index(name: str) -> int:
+    from . import maps
+    try:
+        return maps.TERMINAL_GROUP_TYPES.index(name)
+    except ValueError:
+        return 4  # "information" fallback
+
+
+# ---------------------------------------------------------------------------
+# Terminal location finder (port of termxml2locations.pl)
+#
+# Walks a level's SIDS chunk looking for sides with the "control panel" flag
+# set whose panel_type indicates a computer terminal. Returns world-space
+# (x,y) coordinates suitable for plotting on a map view.
+# ---------------------------------------------------------------------------
+
+# panel_type index -> semantic name (M1)
+_M1_PANEL_TYPES = (
+    "oxygen_refuel", "shield_refuel", "double_shield_refuel",
+    "triple_shield_refuel", "light_switch", "platform_switch",
+    "pattern_buffer", "tag_switch", "computer_terminal", "tag_switch",
+    "double_shield_refuel", "triple_shield_refuel", "platform_switch",
+    "pattern_buffer",
+)
+
+# M2/Infinity: 5 banks of 11 panels, panel_type = bank * 11 + index_in_bank
+_M2_PANEL_BASE = (
+    "oxygen_refuel", "shield_refuel", "double_shield_refuel", "tag_switch",
+    "light_switch", "platform_switch", "tag_switch", "pattern_buffer",
+    "computer_terminal", "tag_switch", "tag_switch",
+)
+
+
+def _panel_name(panel_type: int, is_m1: bool) -> str:
+    if is_m1:
+        if 0 <= panel_type < len(_M1_PANEL_TYPES):
+            return _M1_PANEL_TYPES[panel_type]
+        return "unknown"
+    base = panel_type % 11
+    return _M2_PANEL_BASE[base] if 0 <= base < len(_M2_PANEL_BASE) else "unknown"
+
+
+def terminal_locations(level: dict, *, is_m1: bool) -> list[dict]:
+    """Find all `computer_terminal` panels in a parsed level.
+
+    `level` is a dict from `maps.parse_level()`. Returns a list of dicts
+    with the terminal's world position::
+
+        [{"poly": <int>, "line": <int>, "x": <int>, "y": <int>,
+          "panel_perm": <int>, "panel_type": <int>}, ...]
+
+    The `x`/`y` are in Marathon world units (int16 * 1024-fixed).
+    """
+    sides = level["data"].get("SIDS") or []
+    epnt = level["data"].get("EPNT") or []
+    lins = level["data"].get("LINS") or []
+    out = []
+    for s in sides:
+        # SIDS flag 0x2 = "is a control panel"
+        if not (s["flags"] & 0x2):
+            continue
+        name = _panel_name(s["panel_type"], is_m1)
+        if name != "computer_terminal":
+            continue
+        # Use the line's midpoint as the terminal's position
+        line_idx = s["line_index"]
+        if not 0 <= line_idx < len(lins):
+            continue
+        ln = lins[line_idx]
+        e1, e2 = ln["endpoint1"], ln["endpoint2"]
+        if not (0 <= e1 < len(epnt) and 0 <= e2 < len(epnt)):
+            continue
+        mid_x = (epnt[e1]["x"] + epnt[e2]["x"]) // 2
+        mid_y = (epnt[e1]["y"] + epnt[e2]["y"]) // 2
+        out.append({
+            "poly": s["poly_index"],
+            "line": line_idx,
+            "x": mid_x, "y": mid_y,
+            "panel_perm": s["panel_perm"],
+            "panel_type": s["panel_type"],
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# HTML preview (port of html_preview.pl)
+# ---------------------------------------------------------------------------
+
+def generate_html_preview(images_dir: Path | str, *,
+                          scenario_name: str = "Marathon",
+                          level_names: list[str] | None = None) -> str:
+    """Write an `index.html` file into `images_dir` that displays every
+    rendered terminal page grouped by level.
+
+    Looks for PNGs named `<level>_s<term>[u|s|f]_p<page>.png` (the convention
+    used by `extract()` and `render_terminal()`).
+
+    Returns the absolute path to the generated index.html.
+    """
+    images_dir = Path(images_dir)
+    pngs = sorted(images_dir.glob("*.png"))
+    # Group by level prefix
+    by_level: dict[int, list[Path]] = {}
+    for p in pngs:
+        try:
+            level_idx = int(p.stem.split("_", 1)[0])
+        except ValueError:
+            continue
+        by_level.setdefault(level_idx, []).append(p)
+
+    html: list[str] = ['<!DOCTYPE html>', '<html lang="en"><head>',
+                       f'<title>{_html_escape(scenario_name)} Terminals</title>',
+                       '<meta charset="utf-8">',
+                       '<style>',
+                       'body { background:#000; color:#0f0; font-family:monospace; }',
+                       'h2 { border-bottom:1px solid #0f0; padding-bottom:4px; }',
+                       '.term { border:1px solid #333; padding:8px; margin:12px 0;',
+                       '         display:inline-block; vertical-align:top; }',
+                       '.term img { display:block; image-rendering:pixelated;',
+                       '             max-width: 640px; }',
+                       '</style></head><body>',
+                       f'<h1>{_html_escape(scenario_name)} Terminals</h1>']
+
+    for level_idx in sorted(by_level):
+        title = (level_names[level_idx]
+                 if level_names and level_idx < len(level_names)
+                 else f"Level {level_idx}")
+        html.append(f'<h2 id="level-{level_idx}">{level_idx}. {_html_escape(title)}</h2>')
+        for p in by_level[level_idx]:
+            rel = p.name
+            html.append(f'<div class="term"><img src="{_html_escape(rel)}" '
+                         f'alt="{_html_escape(rel)}"></div>')
+    html.append('</body></html>')
+
+    out = images_dir / "index.html"
+    out.write_text("\n".join(html), encoding="utf-8")
+    return str(out)
+
+
+def _html_escape(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+             .replace('"', "&quot;"))
+
+
+# ---------------------------------------------------------------------------
 # Top-level: render all terminals in one or more levels
 # ---------------------------------------------------------------------------
+
+def extract_m1(source_path: Path | str, dest_dir: Path | str, *,
+               images_dir: Path | str | None = None,
+               fonts_dir: Path | str | None = None,
+               ) -> dict:
+    """Render Marathon 1 terminals from a `Marathon.appl` resource fork.
+
+    M1 stores terminals as human-readable scripts in `term` resources rather
+    than compiled chunks in the level WAD. We extract those scripts, compile
+    each with `compile_m1_script`, and render to PNG. Naming:
+    `appl_term<resource-id>[u|s|f]_p<page>.png`.
+    """
+    from . import strings
+
+    fonts = load_default_fonts(Path(fonts_dir) if fonts_dir else None)
+    images = Path(images_dir) if images_dir else None
+
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    scripts = strings.extract(source_path).get("term", {})
+    manifest: dict = {"terminals": [], "page_count": 0, "terminal_count": 0}
+    for tid, script in sorted(scripts.items()):
+        compiled = compile_m1_script(script)
+        pages = render_terminal(compiled, fonts=fonts,
+                                level_name=f"Terminal {tid}", images_dir=images)
+        for suffix, img in pages:
+            fname = f"appl_term{tid}{suffix}.png"
+            img.save(dest_dir / fname)
+            manifest["page_count"] += 1
+        manifest["terminal_count"] += 1
+        manifest["terminals"].append({"id": tid, "pages": len(pages)})
+    return manifest
+
 
 def extract(source_path: Path | str, dest_dir: Path | str, *,
             images_dir: Path | str | None = None,
             fonts_dir: Path | str | None = None,
             ) -> dict:
-    """Render every M2/Infinity terminal in `source_path` (a Map.sceA or .scen)
-    to PNG files under `dest_dir`. Naming follows the upstream Perl
-    convention: `<level>_s<N>[u|s|f]_p<page>.png`.
+    """Render every terminal in `source_path` to PNG files under `dest_dir`.
+
+    Auto-detects the Marathon version:
+
+    * M2 / Infinity maps (`Map.sceA`) carry compiled `term` chunks in each
+      level WAD — rendered directly.
+    * Marathon 1 `Marathon.appl` carries human-readable terminal scripts in
+      its resource fork — compiled, then rendered (delegates to `extract_m1`).
+
+    Naming follows the upstream Perl convention:
+    `<level>_s<N>[u|s|f]_p<page>.png` (M2/MI) or
+    `appl_term<id>[u|s|f]_p<page>.png` (M1 appl).
     """
-    from . import macbinary, maps, wad
+    from . import macbinary, macrsrc, maps, wad
+
+    blob = Path(source_path).read_bytes()
+    data, rsrc, _m = macbinary.unwrap(blob)
+
+    # M1 detection: a resource fork containing script-format `term` resources.
+    if rsrc:
+        resources = macrsrc.parse(rsrc)
+        m1_terms = [e for e in resources.get("term", [])
+                    if e["data"][:1] in (b";", b"#")]
+        if m1_terms:
+            return extract_m1(source_path, dest_dir,
+                              images_dir=images_dir, fonts_dir=fonts_dir)
 
     fonts = load_default_fonts(Path(fonts_dir) if fonts_dir else None)
     images = Path(images_dir) if images_dir else None
 
-    blob = Path(source_path).read_bytes()
-    data, _r, _m = macbinary.unwrap(blob)
     payload = data if data is not None else blob
     hdr = wad.read_header(payload)
     directory = wad.read_directory(payload, hdr)

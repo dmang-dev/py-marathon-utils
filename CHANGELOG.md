@@ -6,6 +6,33 @@ All notable changes to py-marathon-utils. Format follows
 
 ## [Unreleased]
 
+### Added — Shapes writer, M1 terminals, marine composer, terminal tooling
+
+- `shapes.write_m2` + `shapes.parse_m2_collections`: round-trip writer for
+  M2 / Infinity `.shpA` files. Port of `xml2shapes.pl`. Rebuilds the 32-entry
+  collection table, 544-byte collection headers, and the ctab / hlsh / llsh /
+  bmap sections with their embedded offset tables. Validated pixel-perfect on
+  all 1,288 bitmaps across 29 M2 collections (parse → write → re-parse yields
+  visually identical bitmaps; column-major raw bitmaps are normalized to
+  row-major storage, which changes byte order but not the rendered image).
+- `terminals.compile_m1_script`: compiles Marathon 1's human-readable terminal
+  scripts (`;L000.WELCOME.ENTRY`, `#logon`, `#information`, `$B…$b` inline
+  styling) into the same grouping/font-change structure the renderer consumes.
+  `terminals.extract` now auto-detects M1 `Marathon.appl` and renders its
+  terminals too — the iconic "Arrival" Leela broadcast renders end-to-end.
+- `terminals.terminal_locations`: port of `termxml2locations.pl`. Finds
+  `computer_terminal` control panels in a parsed level and returns their world
+  coordinates (M1 and M2/Infinity panel-type tables).
+- `terminals.generate_html_preview`: port of `html_preview.pl`. Emits a
+  browsable `index.html` grouping rendered terminal PNGs by level.
+- `samsara`: port of `shapesxml2marine.pl` (the Samsara Doom-mod helper).
+  Composites Marathon's layered marine player sprites (collection 6) — legs +
+  torso anchored via key points — into per-color/torso/leg/view PNGs.
+  Abbreviated mode (~7,680 sprites) or `--full-animation` (~23k frames).
+- CLI: new `marathon-utils marines <Shapes> <out>` command; `extract terminals`
+  now accepts `Marathon.appl` as well as map files.
+- Tests: writer round-trip (2) + terminal helpers/compiler/Samsara (8).
+
 ### Added — Terminal renderer, writers, and resource MML
 
 - `terminals`: full port of `termxml2images.pl` (835 lines of Perl). Renders
