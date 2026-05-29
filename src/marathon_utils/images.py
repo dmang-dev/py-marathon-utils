@@ -129,6 +129,7 @@ def _decode_indexed(data: bytes, pos: int, *, packbits: bool) -> Image.Image:
 
     img = Image.new("RGB", (width, height))
     px = img.load()
+    assert px is not None  # Pillow load() is never None for a real image
     for y in range(height):
         if packbits and row_bytes >= 8:
             count, pos = _read_row_count(data, pos, row_bytes)
@@ -155,6 +156,7 @@ def _decode_direct(data: bytes, pos: int) -> Image.Image:
 
     img = Image.new("RGB", (width, height))
     px = img.load()
+    assert px is not None  # Pillow load() is never None for a real image
 
     for y in range(height):
         if pixel_size == 16 and pack_type == 3:

@@ -7,6 +7,23 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    name: Lint + type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check src/ tests/
+      - name: Mypy
+        run: mypy src/marathon_utils
+
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -14,22 +31,44 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.8", "3.10", "3.12"]
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
       - name: Install package + dev deps
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Run tests (unit only — Bungie sample data not in CI)
+        run: pytest -m "not needs_sample_data"
 
-      - name: Lint with ruff
-        run: ruff check src/ tests/
-
-      - name: Run tests (unit only — sample data not in CI)
-        run: pytest -v -m "not needs_sample_data"
+  build:
+    name: Build + verify wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+      - name: Metadata check
+        run: twine check dist/*
+      - name: Verify wheel installs and bundles fonts
+        run: |
+          python -m venv /tmp/v
+          /tmp/v/bin/python -m pip install "$(ls dist/*.whl)[images]"
+          /tmp/v/bin/python - <<'PY'
+          import marathon_utils.terminals as t
+          assert t.default_fonts_dir() is not None, "bundled fonts missing from wheel"
+          assert len(t.load_default_fonts()) == 4
+          print("wheel OK:", marathon_utils.__import__ if False else "fonts bundled")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*

@@ -255,7 +255,7 @@ def extract(source_path: Path | str, dest_dir: Path | str) -> dict:
 
     # Strip Pillow bitmaps from the JSON manifest (they're not JSON-serializable
     # and the user can re-extract images via `apply()`).
-    manifest = {"collections": []}
+    manifest: dict[str, list] = {"collections": []}
     for coll in result["collections"]:
         manifest["collections"].append({
             "index": coll["index"],
@@ -448,7 +448,7 @@ def apply(parsed_collections: list[dict] | dict, patch: dict) -> dict:
     else:
         base = dict(parsed_collections)
 
-    summary = {"collections_touched": [], "details": []}
+    summary: dict[str, list] = {"collections_touched": [], "details": []}
     for pcoll in patch["collections"]:
         idx = pcoll["index"]
         target = base.get(idx)

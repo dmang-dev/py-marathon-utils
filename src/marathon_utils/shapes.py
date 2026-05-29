@@ -119,6 +119,7 @@ class Bitmap:
         """Render to an RGBA Pillow image using the supplied palette."""
         img = Image.new("RGBA", (self.width, self.height))
         px = img.load()
+        assert px is not None  # Pillow load() is never None for a real image
         for y in range(self.height):
             for x in range(self.width):
                 if self.column_order:
@@ -268,6 +269,7 @@ def _palette_swatch(palette: list[tuple[int, int, int]]) -> Image.Image:
     cell = 8
     img = Image.new("RGB", (16 * cell, 16 * cell), (0, 0, 0))
     px = img.load()
+    assert px is not None  # Pillow load() is never None for a real image
     for i in range(256):
         r, g, b = palette[i]
         cx = (i % 16) * cell

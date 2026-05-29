@@ -56,9 +56,9 @@ def _frame_image(low_shape: dict, bitmap, palette: list[tuple[int, int, int]],
     transparency flags are honored via the existing Bitmap.to_image."""
     img = bitmap.to_image(palette)
     if low_shape.get("flags", 0) & 0x8000:  # x_mirror
-        img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     if low_shape.get("flags", 0) & 0x4000:  # y_mirror
-        img = img.transpose(Image.FLIP_TOP_BOTTOM)
+        img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
     return img
 
 

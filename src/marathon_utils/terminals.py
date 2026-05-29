@@ -329,6 +329,7 @@ def _draw_text_line(img: Image.Image, x: int, y: int, runs: list[dict],
     """Render one line of styled runs onto `img` starting at (x,y). Returns the
     final x position after the line."""
     px = img.load()
+    assert px is not None  # Pillow load() is never None for a real image
     img_w, img_h = img.size
     cx = x
     for run in runs:
@@ -403,18 +404,15 @@ def _draw_filled_rect(draw: ImageDraw.ImageDraw, rect: dict,
 # ---------------------------------------------------------------------------
 
 def default_fonts_dir() -> Path | None:
-    """Locate the vendored Courier bitmap fonts.
+    """Locate the bundled Courier bitmap fonts.
 
-    Looks next to the package and under common vendor paths.
+    These ship inside the package (`marathon_utils/fonts/`), generated from the
+    SIL-OFL Courier Prime font (see scripts/generate_fonts.py). Returns None
+    only if the package data somehow wasn't installed.
     """
-    here = Path(__file__).resolve()
-    candidates = [
-        here.parents[2] / "vendor" / "marathon-utils" / "terminals" / "fonts",
-        Path.home() / "Desktop" / "m1ue5" / "M1UE5" / "Tools" / "marathon-utils" / "terminals" / "fonts",
-    ]
-    for c in candidates:
-        if c.is_dir() and (c / "Courier12.txt").is_file():
-            return c
+    bundled = Path(__file__).resolve().parent / "fonts"
+    if bundled.is_dir() and (bundled / "Courier12.txt").is_file():
+        return bundled
     return None
 
 
@@ -422,8 +420,9 @@ def load_default_fonts(fonts_dir: Path | None = None) -> list[BitmapFont]:
     fonts_dir = fonts_dir or default_fonts_dir()
     if fonts_dir is None:
         raise FileNotFoundError(
-            "Could not find Courier bitmap fonts. Pass fonts_dir explicitly or "
-            "ensure vendor/marathon-utils/terminals/fonts is on disk."
+            "Could not find the bundled Courier bitmap fonts "
+            "(marathon_utils/fonts/). Reinstall the package, or pass "
+            "fonts_dir explicitly."
         )
     return [
         BitmapFont.load(fonts_dir / name) for name in (
@@ -448,7 +447,7 @@ def _render_canvas(width: int = 640) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     # Final scale to user width
     if width != CLASSIC_SCREEN["w"]:
         ratio = width / CLASSIC_SCREEN["w"]
-        img = img.resize((width, int(CLASSIC_SCREEN["h"] * ratio)), Image.NEAREST)
+        img = img.resize((width, int(CLASSIC_SCREEN["h"] * ratio)), Image.Resampling.NEAREST)
     return img, ImageDraw.Draw(img)
 
 
@@ -486,7 +485,7 @@ def _render_one_page(text_rect_lines: list[list[dict]],
         # Fit + center within rect preserving aspect
         target_w, target_h = picture_rect["w"], picture_rect["h"]
         pict = picture.copy()
-        pict.thumbnail((target_w, target_h), Image.NEAREST)
+        pict.thumbnail((target_w, target_h), Image.Resampling.NEAREST)
         px = picture_rect["x"] + (target_w - pict.width) // 2
         py = picture_rect["y"] + (target_h - pict.height) // 2
         img.paste(pict, (px, py))

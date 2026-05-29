@@ -17,9 +17,13 @@ Run `marathon-utils <subcommand> --help` for details.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 from pathlib import Path
+
+# Extract kinds that need Pillow — surface a friendly hint if it's missing.
+_NEEDS_PILLOW = {"images", "patches", "terminals", "shapes"}
 
 
 def _cmd_extract(args: argparse.Namespace) -> int:
@@ -30,43 +34,14 @@ def _cmd_extract(args: argparse.Namespace) -> int:
         print(f"ERROR: source not found: {src}", file=sys.stderr)
         return 2
 
-    if kind == "maps":
-        from . import maps as mod
-    elif kind == "sounds":
-        from . import sounds as mod
-    elif kind == "physics":
-        from . import physics as mod
-    elif kind == "strings":
-        from . import strings as mod
-    elif kind == "images":
-        try:
-            from . import images as mod
-        except ImportError as e:  # pragma: no cover
-            print(f"ERROR: image decoder needs Pillow installed: {e}", file=sys.stderr)
+    try:
+        mod = importlib.import_module(f".{kind}", package=__package__)
+    except ImportError as e:
+        if kind in _NEEDS_PILLOW:
+            print(f"ERROR: '{kind}' needs Pillow installed: {e}", file=sys.stderr)
             print("  pip install py-marathon-utils[images]", file=sys.stderr)
             return 3
-    elif kind == "patches":
-        try:
-            from . import patches as mod
-        except ImportError as e:  # pragma: no cover
-            print(f"ERROR: patches reader needs Pillow: {e}", file=sys.stderr)
-            return 3
-    elif kind == "terminals":
-        try:
-            from . import terminals as mod
-        except ImportError as e:  # pragma: no cover
-            print(f"ERROR: terminal renderer needs Pillow: {e}", file=sys.stderr)
-            return 3
-    elif kind == "shapes":
-        try:
-            from . import shapes as mod
-        except ImportError as e:  # pragma: no cover - friendly hint
-            print(f"ERROR: shapes extraction needs Pillow installed: {e}", file=sys.stderr)
-            print("  pip install py-marathon-utils[images]", file=sys.stderr)
-            return 3
-    else:  # argparse should prevent this
-        print(f"ERROR: unknown extract kind {kind!r}", file=sys.stderr)
-        return 2
+        raise
 
     result = mod.extract(src, dst)
     print(json.dumps(result, indent=2, default=str)[:2000])

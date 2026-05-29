@@ -6,6 +6,28 @@ All notable changes to py-marathon-utils. Format follows
 
 ## [Unreleased]
 
+### Packaging & quality
+
+- **Self-contained terminal fonts.** The renderer's bitmap fonts are now
+  generated from the SIL-OFL **Courier Prime** font (`scripts/generate_fonts.py`)
+  and bundled inside the package (`marathon_utils/fonts/`), matching the classic
+  Courier12 metrics. Terminal rendering works from an installed wheel with no
+  external font files. Removed the dependency on the (unbundled) marathon-utils
+  font files.
+- **Wheel/sdist build**: `python -m build` produces a clean wheel that bundles
+  the fonts + `py.typed`; verified by installing into a fresh venv and rendering
+  a terminal. Passes `twine check`.
+- **PEP 561**: added `py.typed` so downstream type-checkers consume our hints.
+- **Single-source version**: `__version__` in `marathon_utils/__init__.py` is
+  now the one source of truth (pyproject reads it dynamically).
+- **mypy clean** across all 16 modules; **ruff** clean. CI now runs ruff + mypy,
+  a 3.8/3.10/3.12 test matrix, and a build-and-verify-wheel job. Added a
+  `.pre-commit-config.yaml`.
+- Removed the vendored `vendor/marathon-utils/` (unlicensed upstream; the parity
+  test now uses a local clone via `MARATHON_UTILS_DIR` and skips otherwise).
+- Pillow floor raised to >=9.1 (uses the `Image.Transpose` / `Image.Resampling`
+  enums).
+
 ### Added — Images.imgA chapter art (QuickDraw PICT v2 decoder)
 
 - `images`: new module decodes the M2/Infinity `Images.imgA` chapter screens

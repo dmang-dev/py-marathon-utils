@@ -279,7 +279,7 @@ def _parse_trigger(d: bytes, off: int) -> dict:
 
 
 def parse_wppx_record(d: bytes, off: int) -> dict:
-    main = {
+    main: dict[str, object] = {
         "item_type": _s16(d, off + 0),
         "powerup_type": _s16(d, off + 2),
         "weapon_class": _s16(d, off + 4),

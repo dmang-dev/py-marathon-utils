@@ -262,7 +262,7 @@ def parse_plat_m2(data: bytes) -> List[dict]:
     out = []
     rec_size = 140
     for off in range(0, len(data) - (rec_size - 1), rec_size):
-        rec = {
+        rec: dict[str, object] = {
             "type": _s16(data, off + 0),
             "static_flags": _u32(data, off + 2),
             "speed": _s16(data, off + 6),
@@ -476,6 +476,8 @@ def parse_level(level_blob: bytes, level_entry: dict, hdr: dict) -> dict:
 
     # Defer physics import to avoid a hard module dep loop and let users skip
     # physics decoding by simply not importing it.
+    from types import ModuleType
+    _physics: ModuleType | None
     try:
         from . import physics as _physics
     except Exception:  # pragma: no cover

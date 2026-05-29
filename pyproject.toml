@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-marathon-utils"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Read Bungie Marathon / Aleph One data files (maps, shapes, sounds) in pure Python."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -26,14 +26,15 @@ classifiers = [
     "Topic :: Games/Entertainment :: First Person Shooters",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Archiving",
+    "Typing :: Typed",
 ]
 
 [project.optional-dependencies]
-images = ["Pillow>=9.0"]
+images = ["Pillow>=9.1"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "Pillow>=9.0",
+    "Pillow>=9.1",
     "ruff>=0.4",
     "mypy>=1.5",
 ]
@@ -47,8 +48,14 @@ Repository = "https://github.com/dmang-dev/py-marathon-utils"
 Issues = "https://github.com/dmang-dev/py-marathon-utils/issues"
 Reference = "https://github.com/Aleph-One-Marathon/alephone"
 
+[tool.setuptools.dynamic]
+version = { attr = "marathon_utils.__version__" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+marathon_utils = ["py.typed", "fonts/*.txt", "fonts/*.md", "fonts/OFL.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -65,7 +72,7 @@ target-version = "py38"
 select = ["E", "F", "I", "B", "UP", "RUF"]
 ignore = ["E501"]  # long lines OK in byte-layout docstrings
 
+# Runtime supports 3.8+, but mypy's own minimum analysis target is 3.10.
 [tool.mypy]
-python_version = "3.8"
-warn_unused_ignores = true
+python_version = "3.10"
 warn_redundant_casts = true

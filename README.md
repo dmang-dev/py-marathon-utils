@@ -1,5 +1,11 @@
 # py-marathon-utils
 
+[![CI](https://github.com/dmang-dev/py-marathon-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/dmang-dev/py-marathon-utils/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)](https://mypy-lang.org/)
+
 Read Bungie Marathon / Aleph One data files (maps, sprites, sounds) in pure Python.
 
 A clean-room Python port of the byte-level parsing in
@@ -24,11 +30,23 @@ implementation: **bit-exact** on all 7,595 polygons across 37 levels
 
 ```bash
 pip install py-marathon-utils                  # core (stdlib only)
-pip install "py-marathon-utils[images]"        # adds shape PNG + map viz (Pillow)
+pip install "py-marathon-utils[images]"        # adds shape/terminal/image PNG output (Pillow)
 pip install "py-marathon-utils[dev]"           # dev: pytest, ruff, mypy
 ```
 
-Python 3.8+.
+Python 3.8+. The image-producing features (shapes, terminals, images, marines,
+visualize) need the `[images]` extra; everything else is stdlib-only.
+
+### Build from source
+
+```bash
+pip install build
+python -m build           # produces dist/*.whl and *.tar.gz
+```
+
+The terminal renderer's bitmap fonts are bundled in the wheel (generated from
+the SIL-OFL Courier Prime font — see `scripts/generate_fonts.py`), so terminal
+rendering works out of the box with no external font files.
 
 ## Quick start
 
